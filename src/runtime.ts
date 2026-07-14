@@ -9,11 +9,14 @@ const parser = new XMLParser({
 const toArray = <T>(value: T | T[] | undefined): T[] => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
 
 const splitClark = (qname: string): { namespace: string; local: string } => {
-  const match = qname.match(/^\{(.*)}(.*)$/);
-  if (!match) {
+  if (!qname.startsWith('{')) {
     return { namespace: '', local: qname };
   }
-  return { namespace: match[1], local: match[2] };
+  const boundary = qname.indexOf('}');
+  if (boundary === -1) {
+    return { namespace: '', local: qname };
+  }
+  return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
 };
 
 const splitXmlName = (name: string): { prefix: string; local: string } => {
@@ -30,7 +33,7 @@ const escapeXml = (value: string): string =>
     .replaceAll("'", '&apos;');
 
 const parsePrimitive = (raw: unknown, typeName: string): unknown => {
-  const [, ns, local] = typeName.match(/^\{(.*)}(.*)$/) ?? [];
+  const { namespace: ns, local } = splitClark(typeName);
   if (ns !== 'http://www.w3.org/2001/XMLSchema') {
     return raw;
   }

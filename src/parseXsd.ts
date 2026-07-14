@@ -35,11 +35,14 @@ const splitQName = (name: string): { prefix: string; local: string } => {
 const toClark = (nsUri: string | undefined, local: string): QName => `{${nsUri ?? ''}}${local}`;
 
 const fromClark = (qname: QName): { namespace: string; local: string } => {
-  const match = qname.match(/^\{(.*)}(.*)$/);
-  if (!match) {
+  if (!qname.startsWith('{')) {
     return { namespace: '', local: qname };
   }
-  return { namespace: match[1], local: match[2] };
+  const boundary = qname.indexOf('}');
+  if (boundary === -1) {
+    return { namespace: '', local: qname };
+  }
+  return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
 };
 
 const resolveTypeQName = (rawType: string | undefined, nsMap: Record<string, string>): QName => {
