@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:complexType name="RequiredType">
+    <xs:sequence>
+      <xs:element name="mustExist" type="xs:string"/>
+      <xs:element name="alsoRequired" type="xs:integer"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="requiredExample" type="t:RequiredType"/>
+</xs:schema>

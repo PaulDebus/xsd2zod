@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<strict xmlns="urn:negative" must="abc">
+  <required>req</required>
+  <unknown>this element is not in the XSD</unknown>
+  <repeated>1</repeated>
+  <repeated>2</repeated>
+</strict>

@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<multiNsExample xmlns="urn:main" xmlns:ext="urn:extension">
+  <title>Multi-Namespace Example</title>
+  <ext:extData>extension data</ext:extData>
+</multiNsExample>

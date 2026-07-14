@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<strict xmlns="urn:negative" must="abc">
+  <required>req</required>
+  <repeated>1</repeated>
+</strict>

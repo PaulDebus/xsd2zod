@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:simpleType name="MyString">
+    <xs:restriction base="xs:string"/>
+  </xs:simpleType>
+  <xs:complexType name="MessageType">
+    <xs:simpleContent>
+      <xs:extension base="t:MyString"/>
+    </xs:simpleContent>
+  </xs:complexType>
+  <xs:element name="message" type="t:MessageType"/>
+</xs:schema>

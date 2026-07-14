@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<config xmlns="urn:curated">
+  <host>localhost</host>
+  <port>8080</port>
+  <port>9090</port>
+</config>

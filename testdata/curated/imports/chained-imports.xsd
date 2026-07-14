@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:level-a" xmlns:a="urn:level-a" xmlns:b="urn:level-b" elementFormDefault="qualified">
+  <xs:import namespace="urn:level-b" schemaLocation="chained-b.xsd"/>
+  <xs:complexType name="AType">
+    <xs:sequence>
+      <xs:element name="aField" type="xs:string"/>
+      <xs:element ref="b:bField"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="chainedExample" type="a:AType"/>
+</xs:schema>

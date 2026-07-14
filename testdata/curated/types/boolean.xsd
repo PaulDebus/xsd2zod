@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:complexType name="FlagsType">
+    <xs:sequence>
+      <xs:element name="active" type="xs:boolean"/>
+      <xs:element name="verified" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="flags" type="t:FlagsType"/>
+</xs:schema>

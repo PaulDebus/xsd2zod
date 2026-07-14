@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<includeExample xmlns="urn:curated">
+  <own>my data</own>
+  <shared>included data</shared>
+</includeExample>

@@ -1,0 +1,2 @@
+<?xml version="1.0"?>
+<nillableItem xmlns="urn:negative" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ref="item-001" xsi:nil="true">has content</nillableItem>

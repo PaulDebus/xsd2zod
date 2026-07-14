@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:negative" xmlns:t="urn:negative" elementFormDefault="qualified">
+  <xs:complexType name="StrictType">
+    <xs:sequence>
+      <xs:element name="required" type="xs:string"/>
+      <xs:element name="optional" type="xs:string" minOccurs="0"/>
+      <xs:element name="repeated" type="xs:integer" minOccurs="2" maxOccurs="4"/>
+    </xs:sequence>
+    <xs:attribute name="must" type="xs:string" use="required"/>
+    <xs:attribute name="maybe" type="xs:string"/>
+  </xs:complexType>
+  <xs:complexType name="OrderedType">
+    <xs:sequence>
+      <xs:element name="first" type="xs:string"/>
+      <xs:element name="second" type="xs:integer"/>
+      <xs:element name="third" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="NillableType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="ref" type="xs:string" use="required"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+  <xs:element name="strict" type="t:StrictType"/>
+  <xs:element name="ordered" type="t:OrderedType"/>
+  <xs:element name="nillableItem" type="t:NillableType" nillable="true"/>
+</xs:schema>

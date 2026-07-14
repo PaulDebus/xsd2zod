@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<qualifiedExample xmlns="urn:qualified">
+  <foo>hello</foo>
+  <bar>99</bar>
+</qualifiedExample>

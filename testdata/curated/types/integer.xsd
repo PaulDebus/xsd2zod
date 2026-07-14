@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:complexType name="CountType">
+    <xs:sequence>
+      <xs:element name="count" type="xs:integer"/>
+      <xs:element name="total" type="xs:integer"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="counter" type="t:CountType"/>
+</xs:schema>

@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:level-b" xmlns:b="urn:level-b" xmlns:c="urn:level-c" elementFormDefault="qualified">
+  <xs:import namespace="urn:level-c" schemaLocation="chained-c.xsd"/>
+  <xs:element name="bField" type="c:CType"/>
+</xs:schema>
