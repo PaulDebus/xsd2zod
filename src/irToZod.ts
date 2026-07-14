@@ -82,19 +82,33 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
 
     const choiceGroups = [...new Set(complexType.fields.map((field) => field.choiceGroup).filter(Boolean))] as string[];
     if (choiceGroups.length === 1) {
-      const branches = complexType.fields.filter((field) => field.choiceGroup === choiceGroups[0] && field.kind === 'element');
+      const selectedChoiceGroup = choiceGroups[0];
+      const branches = complexType.fields.filter((field) => field.choiceGroup === selectedChoiceGroup && field.kind === 'element');
       if (branches.length > 1) {
+        const commonProps = complexType.fields
+          .filter((field) => field.choiceGroup !== selectedChoiceGroup)
+          .map((field) => `${JSON.stringify(toFieldKey(field))}: ${withCardinality(primitiveToZod(field.typeName), field)}`)
+          .join(', ');
         const branchSchemas = branches
           .map((branch) => {
             const key = toFieldKey(branch);
-            return `z.object({ __choice: z.literal(${JSON.stringify(key)}), ${JSON.stringify(key)}: ${withCardinality(
+            const branchProp = `${JSON.stringify(key)}: ${withCardinality(
               primitiveToZod(branch.typeName),
               branch
-            )} })`;
+            )}`;
+            const branchBody = [commonProps, `__choice: z.literal(${JSON.stringify(key)})`, branchProp].filter(Boolean).join(', ');
+            return `z.object({ ${branchBody} })`;
           })
           .join(', ');
 
-        schemaLines.push(`schemas[${JSON.stringify(complexType.name)}] = z.discriminatedUnion('__choice', [${branchSchemas}]);`);
+        const discriminatedUnion = `z.discriminatedUnion('__choice', [${branchSchemas}])`;
+        if (branches.every((branch) => branch.minOccurs === 0)) {
+          const withoutChoice = `z.object({ ${commonProps} })`;
+          schemaLines.push(`schemas[${JSON.stringify(complexType.name)}] = z.union([${discriminatedUnion}, ${withoutChoice}]);`);
+          continue;
+        }
+
+        schemaLines.push(`schemas[${JSON.stringify(complexType.name)}] = ${discriminatedUnion};`);
         continue;
       }
     }

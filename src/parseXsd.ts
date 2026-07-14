@@ -19,6 +19,11 @@ const parser = new XMLParser({
 });
 
 type AnyNode = Record<string, unknown>;
+type FormDefault = 'qualified' | 'unqualified';
+type SchemaFormDefaults = {
+  element: FormDefault;
+  attribute: FormDefault;
+};
 
 const asArray = <T>(value: T | T[] | undefined): T[] => {
   if (value === undefined) {
@@ -65,6 +70,35 @@ const parseCardinality = (node: AnyNode): Cardinality => {
   };
 };
 
+const multiplyMaxOccurs = (left: Cardinality['maxOccurs'], right: Cardinality['maxOccurs']): Cardinality['maxOccurs'] => {
+  if (left === 0 || right === 0) {
+    return 0;
+  }
+  if (left === 'unbounded' || right === 'unbounded') {
+    return 'unbounded';
+  }
+  return left * right;
+};
+
+const combineCardinality = (parent: Cardinality, own: Cardinality): Cardinality => ({
+  minOccurs: parent.minOccurs * own.minOccurs,
+  maxOccurs: multiplyMaxOccurs(parent.maxOccurs, own.maxOccurs)
+});
+
+const normalizeFormDefault = (raw: unknown, fallback: FormDefault): FormDefault =>
+  raw === 'qualified' || raw === 'unqualified' ? raw : fallback;
+
+const resolveDeclaredFieldNamespace = (
+  ownerNs: string,
+  fieldKind: 'attribute' | 'element',
+  formValue: unknown,
+  formDefaults: SchemaFormDefaults
+): string => {
+  const fallback = fieldKind === 'attribute' ? formDefaults.attribute : formDefaults.element;
+  const effectiveForm = normalizeFormDefault(formValue, fallback);
+  return effectiveForm === 'qualified' ? ownerNs : '';
+};
+
 const collectNamespaceMap = (schemaNode: AnyNode): Record<string, string> => {
   const nsMap: Record<string, string> = {};
   for (const [key, value] of Object.entries(schemaNode)) {
@@ -83,7 +117,9 @@ const collectNamespaceMap = (schemaNode: AnyNode): Record<string, string> => {
 
 const getNodeTagLocalName = (tag: string): string => splitQName(tag).local;
 
-const readSchema = (filePath: string): { schemaNode: AnyNode; nsMap: Record<string, string>; targetNs: string } => {
+const readSchema = (
+  filePath: string
+): { schemaNode: AnyNode; nsMap: Record<string, string>; targetNs: string; formDefaults: SchemaFormDefaults } => {
   const xml = fs.readFileSync(filePath, 'utf8');
   const parsed = parser.parse(xml) as Record<string, AnyNode>;
   const schemaEntry = Object.entries(parsed).find(([key]) => getNodeTagLocalName(key) === 'schema');
@@ -93,7 +129,11 @@ const readSchema = (filePath: string): { schemaNode: AnyNode; nsMap: Record<stri
   const schemaNode = schemaEntry[1];
   const nsMap = collectNamespaceMap(schemaNode);
   const targetNs = String(schemaNode['@_targetNamespace'] ?? '');
-  return { schemaNode, nsMap, targetNs };
+  const formDefaults: SchemaFormDefaults = {
+    element: normalizeFormDefault(schemaNode['@_elementFormDefault'], 'unqualified'),
+    attribute: normalizeFormDefault(schemaNode['@_attributeFormDefault'], 'unqualified')
+  };
+  return { schemaNode, nsMap, targetNs, formDefaults };
 };
 
 const nodeChildren = (node: AnyNode): Array<[string, AnyNode]> => {
@@ -114,9 +154,11 @@ const nodeChildren = (node: AnyNode): Array<[string, AnyNode]> => {
 const collectFields = (
   ownerNs: string,
   nsMap: Record<string, string>,
+  formDefaults: SchemaFormDefaults,
   container: AnyNode,
   fields: IrField[],
-  choiceGroup?: string
+  choiceGroup?: string,
+  inheritedCardinality: Cardinality = { minOccurs: 1, maxOccurs: 1 }
 ): void => {
   for (const [tag, child] of nodeChildren(container)) {
     const localTag = getNodeTagLocalName(tag);
@@ -129,10 +171,11 @@ const collectFields = (
         ...nsMap,
         '': ownerNs
       });
+      const effectiveCardinality = combineCardinality(inheritedCardinality, parseCardinality(child));
       fields.push({
-        ...parseCardinality(child),
+        ...effectiveCardinality,
         kind: 'element',
-        qname: toClark(ownerNs, name),
+        qname: toClark(resolveDeclaredFieldNamespace(ownerNs, 'element', child['@_form'], formDefaults), name),
         typeName,
         nillable: child['@_nillable'] === true || child['@_nillable'] === 'true',
         choiceGroup
@@ -146,23 +189,41 @@ const collectFields = (
         continue;
       }
       fields.push({
-        minOccurs: child['@_use'] === 'required' ? 1 : 0,
-        maxOccurs: 1,
+        ...combineCardinality(inheritedCardinality, {
+          minOccurs: child['@_use'] === 'required' ? 1 : 0,
+          maxOccurs: 1
+        }),
         kind: 'attribute',
-        qname: toClark(ownerNs, name),
+        qname: toClark(resolveDeclaredFieldNamespace(ownerNs, 'attribute', child['@_form'], formDefaults), name),
         typeName: resolveTypeQName(child['@_type'] ? String(child['@_type']) : undefined, nsMap)
       });
       continue;
     }
 
     if (localTag === 'sequence' || localTag === 'all') {
-      collectFields(ownerNs, nsMap, child, fields, choiceGroup);
+      collectFields(
+        ownerNs,
+        nsMap,
+        formDefaults,
+        child,
+        fields,
+        choiceGroup,
+        combineCardinality(inheritedCardinality, parseCardinality(child))
+      );
       continue;
     }
 
     if (localTag === 'choice') {
       const groupId = `${fields.length}`;
-      collectFields(ownerNs, nsMap, child, fields, groupId);
+      collectFields(
+        ownerNs,
+        nsMap,
+        formDefaults,
+        child,
+        fields,
+        groupId,
+        combineCardinality(inheritedCardinality, parseCardinality(child))
+      );
       continue;
     }
 
@@ -173,13 +234,12 @@ const collectFields = (
       }
       const baseType = resolveTypeQName(extension['@_base'] ? String(extension['@_base']) : undefined, nsMap);
       fields.push({
-        minOccurs: 1,
-        maxOccurs: 1,
+        ...inheritedCardinality,
         kind: 'text',
         qname: toClark(ownerNs, '_text'),
         typeName: baseType
       });
-      collectFields(ownerNs, nsMap, extension, fields, choiceGroup);
+      collectFields(ownerNs, nsMap, formDefaults, extension, fields, choiceGroup, inheritedCardinality);
       continue;
     }
 
@@ -188,7 +248,7 @@ const collectFields = (
       if (!extension) {
         continue;
       }
-      collectFields(ownerNs, nsMap, extension, fields, choiceGroup);
+      collectFields(ownerNs, nsMap, formDefaults, extension, fields, choiceGroup, inheritedCardinality);
     }
   }
 };
@@ -210,7 +270,7 @@ export const parseXsd = (files: string[]): XsdIr => {
     }
     visited.add(file);
 
-    const { schemaNode, nsMap, targetNs } = readSchema(file);
+    const { schemaNode, nsMap, targetNs, formDefaults } = readSchema(file);
     targetNamespaces.add(targetNs);
 
     for (const [tag, child] of nodeChildren(schemaNode)) {
@@ -243,7 +303,7 @@ export const parseXsd = (files: string[]): XsdIr => {
         }
         const qname = toClark(targetNs, name);
         const fields: IrField[] = [];
-        collectFields(targetNs, nsMap, child, fields);
+        collectFields(targetNs, nsMap, formDefaults, child, fields);
         const extension = nodeChildren(child)
           .find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
         const extensionNode = extension
@@ -268,7 +328,7 @@ export const parseXsd = (files: string[]): XsdIr => {
           if (inlineComplex) {
             typeName = toClark(targetNs, `${name}Type`);
             const fields: IrField[] = [];
-            collectFields(targetNs, nsMap, inlineComplex, fields);
+            collectFields(targetNs, nsMap, formDefaults, inlineComplex, fields);
             complexTypes[typeName] = { name: typeName, fields };
           }
         }
@@ -290,14 +350,26 @@ export const parseXsd = (files: string[]): XsdIr => {
   }
 
   const mergedComplexTypes: Record<string, ComplexTypeDef> = {};
-  for (const [name, type] of Object.entries(complexTypes)) {
-    if (!type.baseType || !complexTypes[type.baseType]) {
-      mergedComplexTypes[name] = type;
-      continue;
+  const resolveMergedFields = (typeName: QName, stack: Set<QName>): IrField[] => {
+    const type = complexTypes[typeName];
+    if (!type) {
+      return [];
     }
+    if (!type.baseType || !complexTypes[type.baseType]) {
+      return type.fields;
+    }
+    if (stack.has(typeName)) {
+      return type.fields;
+    }
+    const nextStack = new Set(stack);
+    nextStack.add(typeName);
+    return [...resolveMergedFields(type.baseType, nextStack), ...type.fields];
+  };
+
+  for (const [name, type] of Object.entries(complexTypes)) {
     mergedComplexTypes[name] = {
       ...type,
-      fields: [...complexTypes[type.baseType].fields, ...type.fields]
+      fields: resolveMergedFields(name as QName, new Set())
     };
   }
 

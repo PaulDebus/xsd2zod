@@ -1,6 +1,8 @@
 import XMLParser from '@nodable/flexible-xml-parser';
 import type { RuntimeFieldMetadata, RuntimeRootMetadata } from './types.js';
 
+const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
+
 const parser = new XMLParser({
   skip: { attributes: false },
   attributes: { prefix: '@_' }
@@ -24,6 +26,29 @@ const splitXmlName = (name: string): { prefix: string; local: string } => {
   return idx === -1 ? { prefix: '', local: name } : { prefix: name.slice(0, idx), local: name.slice(idx + 1) };
 };
 
+const collectNamespaceDeclarations = (node: Record<string, unknown>): Record<string, string> => {
+  const namespaces: Record<string, string> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '@_xmlns') {
+      namespaces[''] = String(value);
+      continue;
+    }
+    if (!key.startsWith('@_xmlns:')) {
+      continue;
+    }
+    namespaces[key.slice('@_xmlns:'.length)] = String(value);
+  }
+  return namespaces;
+};
+
+const withNamespaceContext = (
+  baseContext: Record<string, string>,
+  node: Record<string, unknown>
+): Record<string, string> => ({
+  ...baseContext,
+  ...collectNamespaceDeclarations(node)
+});
+
 const escapeXml = (value: string): string =>
   value
     .replaceAll('&', '&amp;')
@@ -44,7 +69,7 @@ const parsePrimitive = (raw: unknown, typeName: string): unknown => {
 
   switch (local) {
     case 'boolean':
-      return raw === true || raw === 'true';
+      return raw === true || raw === 1 || raw === 'true' || raw === '1';
     case 'int':
     case 'integer':
     case 'decimal':
@@ -56,48 +81,66 @@ const parsePrimitive = (raw: unknown, typeName: string): unknown => {
   }
 };
 
-const findAttributeValue = (node: Record<string, unknown>, local: string): unknown => {
+const findAttributeValue = (
+  node: Record<string, unknown>,
+  qname: string,
+  namespaceContext: Record<string, string>
+): unknown => {
+  const expected = splitClark(qname);
   for (const [key, value] of Object.entries(node)) {
     if (!key.startsWith('@_')) {
       continue;
     }
-    if (splitXmlName(key.slice(2)).local === local) {
+    const { prefix, local } = splitXmlName(key.slice(2));
+    const namespace = prefix ? (namespaceContext[prefix] ?? '') : '';
+    if (local === expected.local && namespace === expected.namespace) {
       return value;
     }
   }
   return undefined;
 };
 
-const findElementValues = (node: Record<string, unknown>, local: string): unknown[] => {
+const findElementValues = (
+  node: Record<string, unknown>,
+  qname: string,
+  namespaceContext: Record<string, string>
+): unknown[] => {
+  const expected = splitClark(qname);
   for (const [key, value] of Object.entries(node)) {
     if (key.startsWith('@_') || key === '#text') {
       continue;
     }
-    if (splitXmlName(key).local === local) {
+    const { prefix, local } = splitXmlName(key);
+    const namespace = prefix ? (namespaceContext[prefix] ?? '') : (namespaceContext[''] ?? '');
+    if (local === expected.local && namespace === expected.namespace) {
       return toArray(value);
     }
   }
   return [];
 };
 
-const readValue = (field: RuntimeFieldMetadata, node: Record<string, unknown>): unknown => {
+const readValue = (
+  field: RuntimeFieldMetadata,
+  node: Record<string, unknown>,
+  namespaceContext: Record<string, string>
+): unknown => {
   if (field.kind === 'text') {
     return parsePrimitive(node['#text'], field.typeName);
   }
 
-  const local = splitClark(field.qname).local;
   const isArray = field.maxOccurs === 'unbounded' || field.maxOccurs > 1;
 
   if (field.kind === 'attribute') {
-    const value = findAttributeValue(node, local);
+    const value = findAttributeValue(node, field.qname, namespaceContext);
     return value === undefined ? undefined : parsePrimitive(value, field.typeName);
   }
 
-  const values = findElementValues(node, local).map((entry) => {
+  const values = findElementValues(node, field.qname, namespaceContext).map((entry) => {
     if (entry && typeof entry === 'object') {
       const entryNode = entry as Record<string, unknown>;
-      const nilValue = findAttributeValue(entryNode, 'nil');
-      if (nilValue === 'true' || nilValue === true) {
+      const entryNamespaceContext = withNamespaceContext(namespaceContext, entryNode);
+      const nilValue = findAttributeValue(entryNode, `{${XSI_NS}}nil`, entryNamespaceContext);
+      if (nilValue === 'true' || nilValue === true || nilValue === '1' || nilValue === 1) {
         return null;
       }
       return parsePrimitive(entryNode['#text'] ?? entry, field.typeName);
@@ -176,25 +219,35 @@ const serializeField = (
   return { elements: pieces, usesXsi };
 };
 
-const extractRoot = (parsed: Record<string, unknown>, expectedLocal: string): Record<string, unknown> => {
-  const entry = Object.entries(parsed).find(([key]) => splitXmlName(key).local === expectedLocal);
+const extractRoot = (
+  parsed: Record<string, unknown>,
+  expectedQName: string
+): { root: Record<string, unknown>; namespaceContext: Record<string, string> } => {
+  const expected = splitClark(expectedQName);
+  const entry = Object.entries(parsed).find(([key, value]) => {
+    const node = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+    const namespaceContext = withNamespaceContext({}, node);
+    const { prefix, local } = splitXmlName(key);
+    const namespace = prefix ? (namespaceContext[prefix] ?? '') : (namespaceContext[''] ?? '');
+    return local === expected.local && namespace === expected.namespace;
+  });
   if (!entry) {
-    throw new Error(`Root element '${expectedLocal}' not found in XML payload`);
+    throw new Error(`Root element '${expectedQName}' not found in XML payload`);
   }
   if (entry[1] && typeof entry[1] === 'object') {
-    return entry[1] as Record<string, unknown>;
+    const root = entry[1] as Record<string, unknown>;
+    return { root, namespaceContext: withNamespaceContext({}, root) };
   }
-  return { '#text': entry[1] };
+  return { root: { '#text': entry[1] }, namespaceContext: {} };
 };
 
 export const parseXmlWithMetadata = <T>(xml: string, metadata: RuntimeRootMetadata): T => {
   const parsed = parser.parse(xml) as Record<string, unknown>;
-  const rootLocal = splitClark(metadata.rootElement).local;
-  const root = extractRoot(parsed, rootLocal);
+  const { root, namespaceContext } = extractRoot(parsed, metadata.rootElement);
 
   const result: Record<string, unknown> = {};
   for (const field of metadata.fields) {
-    const value = readValue(field, root);
+    const value = readValue(field, root, namespaceContext);
     const isArray = field.maxOccurs === 'unbounded' || field.maxOccurs > 1;
     if (value === undefined) {
       if (isArray) {

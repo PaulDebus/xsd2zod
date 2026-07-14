@@ -10,8 +10,8 @@ const run = (command: string, args: string[], cwd: string): void => {
 };
 
 const hasBin = (cwd: string, binName: string): boolean => {
-  const binPath = path.join(cwd, 'node_modules', '.bin', binName);
-  return fs.existsSync(binPath);
+  const binDir = path.join(cwd, 'node_modules', '.bin');
+  return [binName, `${binName}.cmd`, `${binName}.ps1`].some((candidate) => fs.existsSync(path.join(binDir, candidate)));
 };
 
 export const runPostGenerationFormatting = (generatedFiles: string[], cwd = process.cwd()): void => {

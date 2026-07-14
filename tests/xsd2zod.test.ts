@@ -14,6 +14,7 @@ const XSD = `<?xml version="1.0"?>
         <xs:element name="sku" type="xs:string"/>
         <xs:element name="ean" type="xs:string"/>
       </xs:choice>
+      <xs:element name="approved" type="xs:boolean" minOccurs="0"/>
       <xs:element name="note" type="xs:string" minOccurs="0" nillable="true"/>
     </xs:sequence>
     <xs:attribute name="item" type="xs:string"/>
@@ -29,6 +30,33 @@ const XSD = `<?xml version="1.0"?>
 
   <xs:element name="order" type="t:OrderType"/>
   <xs:element name="price" type="t:PriceType"/>
+</xs:schema>`;
+
+const EXTENSION_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:test" xmlns:t="urn:test" elementFormDefault="qualified">
+  <xs:complexType name="C">
+    <xs:sequence>
+      <xs:element name="cField" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="B">
+    <xs:complexContent>
+      <xs:extension base="t:C">
+        <xs:sequence>
+          <xs:element name="bField" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="A">
+    <xs:complexContent>
+      <xs:extension base="t:B">
+        <xs:sequence>
+          <xs:element name="aField" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
 </xs:schema>`;
 
 const extractRuntimeRoots = (metadataCode: string): RuntimeRootMetadata[] => {
@@ -47,24 +75,54 @@ describe('xsd2zod v1 pipeline', () => {
 
     const ir = parseXsd([file]);
     const generated = irToZod(ir);
+    expect(generated.schemas).toContain('z.union([z.discriminatedUnion');
+    expect(generated.schemas).toContain('"note": z.string().optional()');
+    expect(generated.schemas).toContain('"approved": z.boolean().optional()');
     const runtimeRoots = extractRuntimeRoots(generated.metadata);
+
+    const orderType = ir.complexTypes['{urn:test}OrderType'];
+    expect(orderType).toBeDefined();
+    expect(orderType.fields.find((field) => field.qname === '{urn:test}sku')?.minOccurs).toBe(0);
+    expect(orderType.fields.find((field) => field.qname === '{}item')?.kind).toBe('attribute');
 
     const orderMeta = runtimeRoots.find((root) => root.rootElement.endsWith('}order'));
     expect(orderMeta).toBeDefined();
 
     const { parseXml, serializeXml } = createRootHelpers<Record<string, unknown>>(orderMeta!);
 
-    const xml = `<order xmlns="urn:test" item="shadow"><item>one</item><sku>A1</sku><note xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"/></order>`;
+    const xml = `<order xmlns="urn:test" item="shadow"><item>one</item><sku>A1</sku><approved>1</approved><note xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"/></order>`;
     const parsed = parseXml(xml);
 
     expect(parsed['@item']).toBe('shadow');
     expect(parsed.item).toEqual(['one']);
     expect(parsed.__choice).toBe('sku');
+    expect(parsed.approved).toBe(true);
     expect(parsed.note).toBeNull();
 
     const serialized = serializeXml(parsed);
     expect(serialized).toContain('xsi:nil="true"');
     expect(serialized).toContain('<sku>A1</sku>');
+  });
+
+  it('does not treat non-xsi nil as xsi:nil and matches root namespace', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xsd2zod-'));
+    const file = path.join(dir, 'schema.xsd');
+    fs.writeFileSync(file, XSD);
+
+    const ir = parseXsd([file]);
+    const generated = irToZod(ir);
+    const runtimeRoots = extractRuntimeRoots(generated.metadata);
+    const orderMeta = runtimeRoots.find((root) => root.rootElement.endsWith('}order'));
+    expect(orderMeta).toBeDefined();
+
+    const { parseXml } = createRootHelpers<Record<string, unknown>>(orderMeta!);
+    const parsed = parseXml('<order xmlns="urn:test"><note nil="true">kept</note><approved>0</approved></order>');
+    expect(parsed.note).toBe('kept');
+    expect(parsed.approved).toBe(false);
+
+    expect(() => parseXml('<order xmlns="urn:other"><note>bad</note></order>')).toThrow(
+      "Root element '{urn:test}order' not found in XML payload"
+    );
   });
 
   it('supports simpleContent with attributes and text value', () => {
@@ -84,5 +142,15 @@ describe('xsd2zod v1 pipeline', () => {
 
     expect(parsed._text).toBe(42);
     expect(parsed['@currency']).toBe('USD');
+  });
+
+  it('flattens multi-level complex type extension chains', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xsd2zod-'));
+    const file = path.join(dir, 'schema.xsd');
+    fs.writeFileSync(file, EXTENSION_XSD);
+
+    const ir = parseXsd([file]);
+    const aFields = ir.complexTypes['{urn:test}A']?.fields.map((field) => field.qname);
+    expect(aFields).toEqual(['{urn:test}cField', '{urn:test}bField', '{urn:test}aField']);
   });
 });
