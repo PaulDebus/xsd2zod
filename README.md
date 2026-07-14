@@ -13,6 +13,46 @@ const { schemas, metadata } = irToZod(ir);
 npm install xsd2zod
 ```
 
+## Quick start
+
+Run a script to generate `.ts` files from your XSD:
+
+```ts
+import { parseXsd, irToZod, runPostGenerationFormatting } from 'xsd2zod';
+import { writeFileSync } from 'node:fs';
+
+const ir = parseXsd(['schema.xsd']);
+const { schemas, metadata } = irToZod(ir);
+
+writeFileSync('schema.zod.ts', schemas);
+writeFileSync('schema.meta.ts', metadata);
+
+// Optionally format with biome / prettier / eslint:
+runPostGenerationFormatting(['schema.zod.ts', 'schema.meta.ts']);
+```
+
+Then in your app:
+
+```ts
+import { z } from 'zod';
+import { createRootHelpers } from 'xsd2zod';
+import { orderSchema } from './schema.zod';
+import { runtimeMetadata } from './schema.meta';
+
+// Validate XML against the generated Zod schema
+const orderMeta = runtimeMetadata.roots.find(r => r.rootElement.endsWith('}order'))!;
+const { parseXml } = createRootHelpers<z.infer<typeof orderSchema>>(orderMeta);
+
+const xml = `<?xml version="1.0"?>
+<order xmlns="urn:example" id="42">
+  <item>widget</item>
+  <sku>W-001</sku>
+</order>`;
+
+const data = parseXml(xml);
+// data: { item: ['widget'], sku: 'W-001', '@id': '42' }
+```
+
 ## Pipeline
 
 ```
