@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:main" xmlns:main="urn:main" xmlns:lib="urn:library" elementFormDefault="qualified">
+  <xs:import namespace="urn:library" schemaLocation="import-library.xsd"/>
+  <xs:complexType name="ImportExampleType">
+    <xs:sequence>
+      <xs:element name="mainData" type="xs:string"/>
+      <xs:element ref="lib:libData"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="importExample" type="main:ImportExampleType"/>
+</xs:schema>

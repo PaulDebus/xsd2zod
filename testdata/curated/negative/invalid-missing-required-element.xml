@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<strict xmlns="urn:negative" must="abc">
+  <optional>present</optional>
+  <repeated>1</repeated>
+  <repeated>2</repeated>
+</strict>

@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<strict xmlns="urn:wrong-namespace" must="abc">
+  <required>req</required>
+  <repeated>1</repeated>
+  <repeated>2</repeated>
+</strict>

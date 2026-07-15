@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:unqualified" xmlns:t="urn:unqualified" elementFormDefault="unqualified">
+  <xs:complexType name="UnqualifiedType">
+    <xs:sequence>
+      <xs:element name="data" type="xs:string"/>
+      <xs:element name="value" type="xs:integer"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="unqualifiedExample" type="t:UnqualifiedType"/>
+</xs:schema>

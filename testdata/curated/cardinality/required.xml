@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<requiredExample xmlns="urn:curated">
+  <mustExist>I am required</mustExist>
+  <alsoRequired>42</alsoRequired>
+</requiredExample>

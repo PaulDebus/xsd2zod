@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<chainedExample xmlns="urn:level-a" xmlns:b="urn:level-b">
+  <aField>level a</aField>
+  <b:bField lang="en">level c value</b:bField>
+</chainedExample>

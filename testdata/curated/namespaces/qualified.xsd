@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:qualified" xmlns:t="urn:qualified" elementFormDefault="qualified">
+  <xs:complexType name="QualifiedType">
+    <xs:sequence>
+      <xs:element name="foo" type="xs:string"/>
+      <xs:element name="bar" type="xs:integer"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="qualifiedExample" type="t:QualifiedType"/>
+</xs:schema>

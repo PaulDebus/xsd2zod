@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:complexType name="OptionalType">
+    <xs:sequence>
+      <xs:element name="name" type="xs:string"/>
+      <xs:element name="nickname" type="xs:string" minOccurs="0"/>
+      <xs:element name="age" type="xs:integer" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="optionalExample" type="t:OptionalType"/>
+</xs:schema>

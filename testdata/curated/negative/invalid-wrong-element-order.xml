@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<ordered xmlns="urn:negative">
+  <second>42</second>
+  <first>wrong order</first>
+  <third>true</third>
+</ordered>

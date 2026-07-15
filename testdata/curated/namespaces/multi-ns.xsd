@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:main" xmlns:main="urn:main" xmlns:ext="urn:extension" elementFormDefault="qualified">
+  <xs:import namespace="urn:extension" schemaLocation="multi-ns-extension.xsd"/>
+  <xs:complexType name="MultiNsType">
+    <xs:sequence>
+      <xs:element name="title" type="xs:string"/>
+      <xs:element ref="ext:extData"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="multiNsExample" type="main:MultiNsType"/>
+</xs:schema>

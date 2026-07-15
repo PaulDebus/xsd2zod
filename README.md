@@ -136,3 +136,33 @@ const xml = serializeXml(order);
 - `xs:any` / `xs:anyAttribute` wildcards are not supported
 - Attribute `ref` is parsed but type defaults to `xs:string` (global attribute declarations not collected)
 - Mixed content models are not supported
+
+## Testing & Validation Suite
+
+xsd2zod ships with a comprehensive test suite that validates round-trip fidelity: parse XSD → generate Zod schemas → parse XML → serialize back → re-parse → deep-compare.
+
+All tests run via `npm test` (~6s).
+
+| Category | Tests | Description |
+|----------|-------|-------------|
+| Curated round-trip | 22 | basic declarations, content-models, cardinality, types, namespaces, imports |
+| Upstream round-trip | 17 | [xmlschema](https://github.com/brunato/xmlschema) examples + OASIS UBL Invoice/Order |
+| W3C smoke | 8 | Boeing IPO variants via [w3c/xsdtests](https://github.com/w3c/xsdtests) submodule |
+| Benchmark | 1 | parse all upstream XSDs under 5s |
+| Negative | 7 | namespace rejection + graceful handling of lenient validation |
+| Pipeline | 21 | CLI + `xsd2zod` unit tests |
+
+### Test data sources
+
+- **`testdata/curated/`** — 22 hand-authored XSD/XML pairs + 7 negative variants (CC0-1.0)
+- **`testdata/upstream/xmlschema/`** — vehicles, collection, stockquote, menù examples from [brunato/xmlschema](https://github.com/brunato/xmlschema) (MIT)
+- **`testdata/upstream/oasis-ubl-2.4/`** — UBL Invoice + Order subset (OASIS RF on Limited Terms)
+- **`testdata/upstream/w3c-xsdtests/`** — git submodule of [w3c/xsdtests](https://github.com/w3c/xsdtests), pinned commit (W3C Document License)
+
+Full license attributions in [`testdata/THIRD_PARTY_NOTICES.md`](testdata/THIRD_PARTY_NOTICES.md).
+
+### Known gaps (tracked as GitHub issues)
+
+- [#8] — `serializeXml` fails on nested complex types (`[object Object]`)
+- [#9] — `irToZod` omits runtime metadata for root elements with primitive/simple types
+- [#10] — generated Zod schemas don't enforce cardinality, order, or unexpected elements

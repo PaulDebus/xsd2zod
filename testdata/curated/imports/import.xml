@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<importExample xmlns="urn:main" xmlns:lib="urn:library">
+  <mainData>hello</mainData>
+  <lib:libData>42</lib:libData>
+</importExample>

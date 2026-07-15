@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:include schemaLocation="include-common.xsd"/>
+  <xs:complexType name="IncludeExampleType">
+    <xs:sequence>
+      <xs:element name="own" type="xs:string"/>
+      <xs:element ref="t:shared"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="includeExample" type="t:IncludeExampleType"/>
+</xs:schema>

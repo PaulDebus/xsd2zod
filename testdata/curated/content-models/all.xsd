@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:complexType name="AllType">
+    <xs:all>
+      <xs:element name="a" type="xs:string"/>
+      <xs:element name="b" type="xs:string"/>
+      <xs:element name="c" type="xs:string"/>
+    </xs:all>
+  </xs:complexType>
+  <xs:element name="allExample" type="t:AllType"/>
+</xs:schema>
