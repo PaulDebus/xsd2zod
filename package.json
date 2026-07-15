@@ -8,8 +8,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest",
     "build": "tsc -p tsconfig.build.json",
+    "test:watch": "vitest",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "repository": {

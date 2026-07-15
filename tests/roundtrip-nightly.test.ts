@@ -1,18 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { createRootHelpers, irToZod, parseXsd } from '../src/index.js';
-import type { RuntimeRootMetadata } from '../src/types.js';
+import { runRoundTrip } from './helpers.js';
+import { parseXsd } from '../src/index.js';
 
 const W3C_DIR = path.resolve('testdata/upstream/w3c-xsdtests');
 
-function extractRootLocalName(xml: string): string {
-  const match = xml.match(/<([^\s?>/]+)/);
-  if (!match) throw new Error('Cannot find root element in XML');
-  const name = match[1];
-  const colonIdx = name.indexOf(':');
-  return colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
-}
+const KNOWN_FAILURES = new Map<string, string>([
+  ['boeingData/ipo1/ipo_1.xml', '#8 — serializeXml fails on nested complex types'],
+  ['boeingData/ipo1/ipo_2.xml', '#8 — serializeXml fails on nested complex types'],
+  ['boeingData/ipo2/ipo_1.xml', '#8 — serializeXml fails on nested complex types'],
+  ['boeingData/ipo2/ipo_2.xml', '#8 — serializeXml fails on nested complex types'],
+  ['boeingData/ipo3/ipo_1.xml', '#8 — serializeXml fails on nested complex types'],
+  ['boeingData/ipo3/ipo_2.xml', '#8 — serializeXml fails on nested complex types'],
+  ['boeingData/ipo4/ipo_2.xml', '#8 — serializeXml fails on nested complex types'],
+]);
 
 describe('nightly round-trip (W3C smoke)', () => {
   if (!fs.existsSync(W3C_DIR) || fs.readdirSync(W3C_DIR).length === 0) {
@@ -38,39 +40,15 @@ describe('nightly round-trip (W3C smoke)', () => {
     if (xsdFiles.length === 0 || xmlFiles.length === 0) continue;
 
     for (const xmlFile of xmlFiles) {
-      it(`round-trips W3C ${subdir}/${xmlFile}`, () => {
-        try {
-          const ir = parseXsd(xsdFiles);
-          const generated = irToZod(ir);
-
-          const metadataMatch = generated.metadata.match(/runtimeMetadata = ([\s\S]+) as const;/);
-          if (!metadataMatch) throw new Error('runtime metadata not found');
-          const runtimeRoots = JSON.parse(metadataMatch[1]).roots as RuntimeRootMetadata[];
-
-          const xml = fs.readFileSync(path.join(dir, xmlFile), 'utf8');
-          const xmlRootTag = extractRootLocalName(xml);
-
-          const rootMeta = runtimeRoots.find(r => {
-            const localName = r.rootElement.split('}').pop()!;
-            return localName === xmlRootTag;
-          });
-
-          if (!rootMeta) {
-            return;
-          }
-
-          const { parseXml, serializeXml } = createRootHelpers<Record<string, unknown>>(rootMeta);
-
-          const objectA = parseXml(xml);
-          const serialized = serializeXml(objectA);
-          expect(serialized).toBeTruthy();
-
-          const objectB = parseXml(serialized);
-          expect(objectB).toEqual(objectA);
-        } catch {
-          return;
-        }
-      });
+      const key = `${subdir}/${xmlFile}`;
+      const reason = KNOWN_FAILURES.get(key);
+      if (reason) {
+        it.skip(`round-trips W3C ${key} — SKIPPED: ${reason}`, () => {});
+      } else {
+        it(`round-trips W3C ${key}`, () => {
+          runRoundTrip(xsdFiles, path.join(dir, xmlFile));
+        });
+      }
     }
   }
 });

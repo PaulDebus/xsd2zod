@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { createRootHelpers, irToZod, parseXsd } from '../src/index.js';
-import type { RuntimeRootMetadata } from '../src/types.js';
+import { createRootHelpers } from '../src/index.js';
+import { extractRootLocalName, findRootMetadata, getRuntimeRoots } from './helpers.js';
 
 const NEGATIVE_DIR = path.resolve('testdata/curated/negative');
 
@@ -26,14 +26,6 @@ function discoverNegativeCases(): NegativeCase[] {
   return cases;
 }
 
-function extractRootLocalName(xml: string): string {
-  const match = xml.match(/<([^\s?>/]+)/);
-  if (!match) throw new Error('Cannot find root element in XML');
-  const name = match[1];
-  const colonIdx = name.indexOf(':');
-  return colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
-}
-
 const negativeCases = discoverNegativeCases();
 
 describe('negative — invalid XML handling', () => {
@@ -43,26 +35,13 @@ describe('negative — invalid XML handling', () => {
     return;
   }
 
-  const ir = parseXsd([xsdPath]);
-  const generated = irToZod(ir);
-
-  const metadataMatch = generated.metadata.match(/runtimeMetadata = ([\s\S]+) as const;/);
-  if (!metadataMatch) throw new Error('runtime metadata not found');
-  const runtimeRoots = JSON.parse(metadataMatch[1]).roots as RuntimeRootMetadata[];
+  const runtimeRoots = getRuntimeRoots([xsdPath]);
 
   for (const c of negativeCases) {
     if (c.expectedToThrow) {
       it(`rejects ${c.name}`, () => {
         const xml = fs.readFileSync(c.xmlFile, 'utf8');
-        const xmlRootTag = extractRootLocalName(xml);
-        const rootMeta = runtimeRoots.find(r => {
-          const localName = r.rootElement.split('}').pop()!;
-          return localName === xmlRootTag;
-        });
-
-        if (!rootMeta) {
-          return;
-        }
+        const rootMeta = findRootMetadata(runtimeRoots, xml);
 
         const { parseXml } = createRootHelpers<Record<string, unknown>>(rootMeta);
         expect(() => parseXml(xml)).toThrow();
@@ -70,15 +49,7 @@ describe('negative — invalid XML handling', () => {
     } else {
       it(`gracefully handles ${c.name} (no throw — lenient validation)`, () => {
         const xml = fs.readFileSync(c.xmlFile, 'utf8');
-        const xmlRootTag = extractRootLocalName(xml);
-        const rootMeta = runtimeRoots.find(r => {
-          const localName = r.rootElement.split('}').pop()!;
-          return localName === xmlRootTag;
-        });
-
-        if (!rootMeta) {
-          return;
-        }
+        const rootMeta = findRootMetadata(runtimeRoots, xml);
 
         const { parseXml } = createRootHelpers<Record<string, unknown>>(rootMeta);
         expect(() => parseXml(xml)).not.toThrow();

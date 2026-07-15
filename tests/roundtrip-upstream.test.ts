@@ -1,14 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect } from 'vitest';
-import { createRootHelpers, irToZod, parseXsd } from '../src/index.js';
-import type { RuntimeRootMetadata } from '../src/types.js';
+import { describe, it } from 'vitest';
+import { runRoundTrip, type TestCase } from './helpers.js';
 
-interface TestCase {
-  name: string;
-  xsdFiles: string[];
-  xmlFile: string;
-}
+const KNOWN_FAILURES = new Map<string, string>([
+  ['oasis-ubl-2.4/xml/UBL-Invoice-2.1-Example', '#8 — serializeXml fails on nested complex types'],
+  ['oasis-ubl-2.4/xml/UBL-Order-2.0-Example', '#8 — serializeXml fails on nested complex types'],
+  ['xmlschema/collection/collection-default', '#8 — serializeXml fails on nested complex types'],
+  ['xmlschema/collection/collection3bis', '#8 — serializeXml fails on nested complex types'],
+  ['xmlschema/collection/collection4', '#8 — serializeXml fails on nested complex types'],
+  ['xmlschema/collection/collection6', 'root <xs:import> is not a document element'],
+  ['xmlschema/menù/menù-ascii', 'numeric character references in root tag not supported by string-based root matching'],
+]);
 
 function discoverUpstreamCases(): TestCase[] {
   const cases: TestCase[] = [];
@@ -46,59 +49,17 @@ function discoverUpstreamCases(): TestCase[] {
   return cases;
 }
 
-function extractRootLocalName(xml: string): string {
-  const match = xml.match(/<([^\s?>/]+)/);
-  if (!match) throw new Error('Cannot find root element in XML');
-  const name = match[1];
-  const colonIdx = name.indexOf(':');
-  return colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
-}
-
-function roundTripSkipped(reason: string): void {
-}
-
-function runRoundTrip(xsdFiles: string[], xmlFile: string): boolean {
-  try {
-    const ir = parseXsd(xsdFiles);
-    const generated = irToZod(ir);
-
-    const metadataMatch = generated.metadata.match(/runtimeMetadata = ([\s\S]+) as const;/);
-    if (!metadataMatch) throw new Error('runtime metadata not found');
-    const runtimeRoots = JSON.parse(metadataMatch[1]).roots as RuntimeRootMetadata[];
-
-    const xml = fs.readFileSync(xmlFile, 'utf8');
-    const xmlRootTag = extractRootLocalName(xml);
-
-    const rootMeta = runtimeRoots.find(r => {
-      const localName = r.rootElement.split('}').pop()!;
-      return localName === xmlRootTag;
-    });
-
-    if (!rootMeta) return false;
-
-    const { parseXml, serializeXml } = createRootHelpers<Record<string, unknown>>(rootMeta);
-
-    const objectA = parseXml(xml);
-    const serialized = serializeXml(objectA);
-    expect(serialized).toBeTruthy();
-
-    const objectB = parseXml(serialized);
-    expect(objectB).toEqual(objectA);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 const upstreamCases = discoverUpstreamCases();
 
 describe('upstream round-trip', () => {
   for (const c of upstreamCases) {
-    it(`round-trips ${c.name}`, () => {
-      const ok = runRoundTrip(c.xsdFiles, c.xmlFile);
-      if (!ok) {
-        return;
-      }
-    });
+    const reason = KNOWN_FAILURES.get(c.name);
+    if (reason) {
+      it.skip(`round-trips ${c.name} — SKIPPED: ${reason}`, () => {});
+    } else {
+      it(`round-trips ${c.name}`, () => {
+        runRoundTrip(c.xsdFiles, c.xmlFile);
+      });
+    }
   }
 });

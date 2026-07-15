@@ -1,14 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect } from 'vitest';
-import { createRootHelpers, irToZod, parseXsd } from '../src/index.js';
-import type { RuntimeRootMetadata } from '../src/types.js';
-
-interface TestCase {
-  name: string;
-  xsdFiles: string[];
-  xmlFile: string;
-}
+import { describe, it } from 'vitest';
+import { runRoundTrip, type TestCase } from './helpers.js';
 
 function discoverCuratedCases(): TestCase[] {
   const cases: TestCase[] = [];
@@ -30,44 +23,6 @@ function discoverCuratedCases(): TestCase[] {
   }
 
   return cases;
-}
-
-function extractRootLocalName(xml: string): string {
-  const match = xml.match(/<([^\s?>/]+)/);
-  if (!match) throw new Error('Cannot find root element in XML');
-  const name = match[1];
-  const colonIdx = name.indexOf(':');
-  return colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
-}
-
-function runRoundTrip(xsdFiles: string[], xmlFile: string): void {
-  const ir = parseXsd(xsdFiles);
-  const generated = irToZod(ir);
-
-  const metadataMatch = generated.metadata.match(/runtimeMetadata = ([\s\S]+) as const;/);
-  if (!metadataMatch) throw new Error('runtime metadata not found in generated output');
-  const runtimeRoots = JSON.parse(metadataMatch[1]).roots as RuntimeRootMetadata[];
-
-  const xml = fs.readFileSync(xmlFile, 'utf8');
-  const xmlRootTag = extractRootLocalName(xml);
-
-  const rootMeta = runtimeRoots.find(r => {
-    const localName = r.rootElement.split('}').pop()!;
-    return localName === xmlRootTag;
-  });
-
-  if (!rootMeta) {
-    return;
-  }
-
-  const { parseXml, serializeXml } = createRootHelpers<Record<string, unknown>>(rootMeta);
-
-  const objectA = parseXml(xml);
-  const serialized = serializeXml(objectA);
-  expect(serialized).toBeTruthy();
-
-  const objectB = parseXml(serialized);
-  expect(objectB).toEqual(objectA);
 }
 
 const curatedCases = discoverCuratedCases();
