@@ -22,8 +22,10 @@
 - [ ] UBL CreditNote
 - [ ] Import-resolution failure cases
 
-## Phase 3 — Nightly conformance (future)
-- [ ] Full W3C XSD 1.0 corpus
+## Phase 3 — Nightly conformance (current)
+- [x] W3C XSD 1.0 smoke tests (4 Boeing IPO variants — 8 test cases)
+- [x] Benchmark: parse all upstream XSDs under 5s
+- [ ] Full W3C XSD 1.0 corpus (26k+ XML files — needs filtering)
 - [ ] XSD 1.1 corpus (if licensing clarified)
 
 ## Known gaps (not yet supported by xsd2zod)
