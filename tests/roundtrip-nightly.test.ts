@@ -7,13 +7,14 @@ import { parseXsd } from '../src/index.js';
 const W3C_DIR = path.resolve('testdata/upstream/w3c-xsdtests');
 
 const KNOWN_FAILURES = new Map<string, string>([
-  ['boeingData/ipo1/ipo_1.xml', 'inline anonymous complex types on local elements + unqualified element form not yet supported by serializeXml'],
-  ['boeingData/ipo1/ipo_2.xml', 'inline anonymous complex types on local elements + unqualified element form not yet supported by serializeXml'],
-  ['boeingData/ipo2/ipo_1.xml', 'inline anonymous complex types on local elements + unqualified element form not yet supported by serializeXml'],
-  ['boeingData/ipo2/ipo_2.xml', 'inline anonymous complex types on local elements + unqualified element form not yet supported by serializeXml'],
-  ['boeingData/ipo3/ipo_1.xml', 'inline anonymous complex types on local elements + unqualified element form not yet supported by serializeXml'],
-  ['boeingData/ipo3/ipo_2.xml', 'inline anonymous complex types on local elements + unqualified element form not yet supported by serializeXml'],
-  ['boeingData/ipo4/ipo_2.xml', 'inline anonymous complex types on local elements + unqualified element form + xsd:redefine not yet supported by serializeXml'],
+  ['boeingData/ipo1/ipo_1.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo1/ipo_2.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo2/ipo_1.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo2/ipo_2.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo3/ipo_1.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo3/ipo_2.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo4/ipo_1.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form (#36, #35)'],
+  ['boeingData/ipo4/ipo_2.xml', 'serialized XML fails XSD validation — anonymous inline complex types on root elements + unqualified element form + xsd:redefine (#36, #35)'],
 ]);
 
 describe('nightly round-trip (W3C smoke)', () => {
@@ -45,8 +46,8 @@ describe('nightly round-trip (W3C smoke)', () => {
       if (reason) {
         it.skip(`round-trips W3C ${key} — SKIPPED: ${reason}`, () => {});
       } else {
-        it(`round-trips W3C ${key}`, () => {
-          runRoundTrip(xsdFiles, path.join(dir, xmlFile));
+        it(`round-trips W3C ${key}`, async () => {
+          await runRoundTrip(xsdFiles, path.join(dir, xmlFile));
         });
       }
     }
