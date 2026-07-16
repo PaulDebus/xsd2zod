@@ -115,6 +115,9 @@ const findElementValues = (
     if (local === expected.local && namespace === expected.namespace) {
       return toArray(value);
     }
+    if (local === expected.local && expected.namespace === '' && !prefix) {
+      return toArray(value);
+    }
   }
   return [];
 };
@@ -175,7 +178,7 @@ const choosePrefix = (uri: string, prefixMap: Map<string, string>): string => {
 
 const elementName = (qname: string, prefixMap: Map<string, string>, preferredRootNs: string): string => {
   const { namespace, local } = splitClark(qname);
-  if (!namespace || namespace === preferredRootNs) {
+  if (!namespace) {
     return local;
   }
   return `${choosePrefix(namespace, prefixMap)}:${local}`;
@@ -334,8 +337,11 @@ export const serializeXmlWithMetadata = <T extends Record<string, unknown>>(
   const { attributes, elements, usesXsi } = serializeTypeFields(obj, root, ctx);
 
   const nsDecls: string[] = [];
+  let rootTag = rootInfo.local;
   if (rootInfo.namespace) {
-    nsDecls.push(`xmlns="${rootInfo.namespace}"`);
+    const rootPrefix = choosePrefix(rootInfo.namespace, ctx.prefixMap);
+    rootTag = `${rootPrefix}:${rootInfo.local}`;
+    nsDecls.push(`xmlns:${rootPrefix}="${rootInfo.namespace}"`);
   }
   for (const [uri, prefix] of ctx.prefixMap.entries()) {
     if (!uri || uri === rootInfo.namespace) {
@@ -348,8 +354,8 @@ export const serializeXmlWithMetadata = <T extends Record<string, unknown>>(
   }
 
   const attrs = [...nsDecls, ...attributes].join(' ');
-  const opening = attrs ? `<${rootInfo.local} ${attrs}>` : `<${rootInfo.local}>`;
-  return `${opening}${elements.join('')}</${rootInfo.local}>`;
+  const opening = attrs ? `<${rootTag} ${attrs}>` : `<${rootTag}>`;
+  return `${opening}${elements.join('')}</${rootTag}>`;
 };
 
 export const createRootHelpers = <T>(
