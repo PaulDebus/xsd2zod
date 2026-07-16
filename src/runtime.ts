@@ -181,6 +181,12 @@ const elementName = (qname: string, prefixMap: Map<string, string>, preferredRoo
   return `${choosePrefix(namespace, prefixMap)}:${local}`;
 };
 
+type SerializeCtx = {
+  prefixMap: Map<string, string>;
+  rootNs: string;
+  types: Record<string, RuntimeTypeMetadata>;
+};
+
 const serializePrimitive = (value: unknown): string => {
   if (value === null || value === undefined) {
     return '';
@@ -194,11 +200,9 @@ const serializePrimitive = (value: unknown): string => {
 const serializeField = (
   field: RuntimeFieldMetadata,
   value: unknown,
-  prefixMap: Map<string, string>,
-  rootNs: string,
-  types: Record<string, RuntimeTypeMetadata>
+  ctx: SerializeCtx
 ): { attr?: string; elements: string[]; usesXsi: boolean } => {
-  const localName = elementName(field.qname, prefixMap, rootNs);
+  const localName = elementName(field.qname, ctx.prefixMap, ctx.rootNs);
   if (field.kind === 'attribute') {
     if (value === undefined) {
       return { elements: [], usesXsi: false };
@@ -213,7 +217,7 @@ const serializeField = (
   const values = field.maxOccurs === 'unbounded' || field.maxOccurs > 1 ? (Array.isArray(value) ? value : value === undefined ? [] : [value]) : [value];
   const pieces: string[] = [];
   let usesXsi = false;
-  const complexType = types[field.typeName];
+  const complexType = ctx.types[field.typeName];
 
   for (const current of values) {
     if (current === undefined) {
@@ -225,7 +229,7 @@ const serializeField = (
       continue;
     }
     if (complexType && typeof current === 'object') {
-      const inner = serializeTypeFields(current as Record<string, unknown>, complexType, prefixMap, rootNs, types);
+      const inner = serializeTypeFields(current as Record<string, unknown>, complexType, ctx);
       usesXsi = usesXsi || inner.usesXsi;
       const attrStr = inner.attributes.length > 0 ? ` ${inner.attributes.join(' ')}` : '';
       pieces.push(`<${localName}${attrStr}>${inner.elements.join('')}</${localName}>`);
@@ -264,9 +268,7 @@ const parseTypeFields = (
 const serializeTypeFields = (
   obj: Record<string, unknown>,
   metadata: RuntimeTypeMetadata,
-  prefixMap: Map<string, string>,
-  rootNs: string,
-  types: Record<string, RuntimeTypeMetadata>
+  ctx: SerializeCtx
 ): { attributes: string[]; elements: string[]; usesXsi: boolean } => {
   const attributes: string[] = [];
   const elements: string[] = [];
@@ -275,7 +277,7 @@ const serializeTypeFields = (
     if (field.choiceGroup && obj.__choice && obj.__choice !== field.key) {
       continue;
     }
-    const fieldResult = serializeField(field, obj[field.key], prefixMap, rootNs, types);
+    const fieldResult = serializeField(field, obj[field.key], ctx);
     if (fieldResult.attr) {
       attributes.push(fieldResult.attr);
     }
@@ -324,14 +326,18 @@ export const serializeXmlWithMetadata = <T extends Record<string, unknown>>(
   types: Record<string, RuntimeTypeMetadata>
 ): string => {
   const rootInfo = splitClark(root.rootElement);
-  const prefixMap = new Map<string, string>();
-  const { attributes, elements, usesXsi } = serializeTypeFields(obj, root, prefixMap, rootInfo.namespace, types);
+  const ctx: SerializeCtx = {
+    prefixMap: new Map<string, string>(),
+    rootNs: rootInfo.namespace,
+    types,
+  };
+  const { attributes, elements, usesXsi } = serializeTypeFields(obj, root, ctx);
 
   const nsDecls: string[] = [];
   if (rootInfo.namespace) {
     nsDecls.push(`xmlns="${rootInfo.namespace}"`);
   }
-  for (const [uri, prefix] of prefixMap.entries()) {
+  for (const [uri, prefix] of ctx.prefixMap.entries()) {
     if (!uri || uri === rootInfo.namespace) {
       continue;
     }

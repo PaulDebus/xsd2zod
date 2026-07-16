@@ -150,7 +150,7 @@ const xml = serializeXml(order);
 
 ## Why trust this?
 
-We ship a **multi-tier test suite** that exercises the full pipeline on real-world and curated fixtures. Every test validates round-trip fidelity: XSD → Zod schemas → parse XML → serialize back → re-parse → deep-compare.
+We ship a **multi-tier test suite** that exercises the full pipeline on real-world and curated fixtures. Every round-trip test validates: XSD → Zod schemas → parse XML → serialize back → re-parse → deep-compare. Additionally, the serialized XML is validated against the original XSD using [libxml2-wasm](https://www.npmjs.com/package/libxml2-wasm) (the reference libxml2 engine ported to WebAssembly), catching mismatches that round-trip-only testing would miss.
 
 Run it locally:
 
@@ -158,14 +158,14 @@ Run it locally:
 npm test
 ```
 
-**Test matrix** (~80 tests, ~6 s):
+**Test matrix** (~77 tests, ~8 s):
 
 | Category | Count | What it covers |
 |----------|------:|----------------|
-| Curated round-trip | 22 | Basic declarations, content models, cardinality, types, namespaces, imports |
-| Upstream round-trip | 17 | [`xmlschema`](https://github.com/brunato/xmlschema) examples + OASIS UBL Invoice/Order |
-| W3C smoke | 8 | Boeing IPO variants via [w3c/xsdtests](https://github.com/w3c/xsdtests) submodule |
-| Pipeline / CLI | 21 | CLI entry point, code generation, and unit tests |
+| Curated round-trip | 22 (21 ✅) | Basic declarations, content models, cardinality, types, namespaces, imports — serialized XML validated against libxml2 |
+| Upstream round-trip | 17 (2 ✅) | [`xmlschema`](https://github.com/brunato/xmlschema) examples + OASIS UBL Invoice/Order — serialized XML validated against libxml2 |
+| W3C smoke | 8 (0 ✅) | Boeing IPO variants via [w3c/xsdtests](https://github.com/w3c/xsdtests) submodule — serialized XML validated against libxml2 |
+| Pipeline / CLI | 22 | CLI entry point (16), code generation + runtime unit tests (6) |
 | Benchmark | 1 | Parses all upstream XSDs in under 5 s |
 | Negative | 7 | Namespace rejection and graceful handling of lenient validation |
 
@@ -187,6 +187,8 @@ Full license attributions in [`testdata/THIRD_PARTY_NOTICES.md`](testdata/THIRD_
 
 ### Known gaps (tracked as GitHub issues)
 
-- [#8] — `serializeXml` fails on nested complex types (`[object Object]`)
 - [#9] — `irToZod` omits runtime metadata for root elements with primitive/simple types
 - [#10] — generated Zod schemas don't enforce cardinality, order, or unexpected elements
+- [#35] — `elementFormDefault="unqualified"` not handled in parser/serializer (caught by libxml2 XSD validation)
+- [#36] — Anonymous inline complex types on root elements not handled by runtime (caught by libxml2 XSD validation)
+- [#37] — UBL schema round-trip validation failures (caught by libxml2 XSD validation)
