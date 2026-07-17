@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import iconv from 'iconv-lite';
 import { expect } from 'vitest';
 import { createRootHelpers, decodeXmlEntities, irToZod, parseXsd } from '../src/index.js';
 import type { RuntimeMetadata, RuntimeRootMetadata } from '../src/types.js';
@@ -8,6 +9,17 @@ export interface TestCase {
   name: string;
   xsdFiles: string[];
   xmlFile: string;
+}
+
+export function readXmlFile(filePath: string): string {
+  const raw = fs.readFileSync(filePath);
+  const declMatch = raw.toString('ascii', 0, Math.min(raw.length, 200)).match(/encoding\s*=\s*["']([^"']+)["']/);
+  const encoding = declMatch ? declMatch[1] : 'utf-8';
+  try {
+    return iconv.decode(raw, encoding);
+  } catch {
+    return raw.toString('utf-8');
+  }
 }
 
 export function extractRootLocalName(xml: string): string {
@@ -74,7 +86,7 @@ export async function validateXmlAgainstSchemas(xml: string, xsdFiles: string[])
         continue;
       }
 
-      const schemaSource = fs.readFileSync(xsdFile, 'utf-8');
+      const schemaSource = readXmlFile(xsdFile);
 
       let schemaDoc: ReturnType<typeof XmlDocument.fromString>;
       try {
@@ -115,7 +127,7 @@ export async function validateXmlAgainstSchemas(xml: string, xsdFiles: string[])
 
 export async function runRoundTrip(xsdFiles: string[], xmlFile: string): Promise<void> {
   const metadata = getRuntimeMetadata(xsdFiles);
-  const xml = fs.readFileSync(xmlFile, 'utf8');
+  const xml = readXmlFile(xmlFile);
   const rootMeta = findRootMetadata(metadata, xml);
 
   const { parseXml, serializeXml } = createRootHelpers<Record<string, unknown>>(rootMeta, metadata.types);

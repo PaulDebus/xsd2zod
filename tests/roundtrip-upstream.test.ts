@@ -6,15 +6,12 @@ import { runRoundTrip, type TestCase } from './helpers.js';
 const KNOWN_FAILURES = new Map<string, string>([
   ['oasis-ubl-2.4/xml/UBL-Invoice-2.1-Example', 'serialized XML fails XSD validation — UBL schema imports and element ordering issues (#37)'],
   ['oasis-ubl-2.4/xml/UBL-Order-2.0-Example', 'serialized XML fails XSD validation — UBL schema imports and element ordering issues (#37)'],
-  ['xmlschema/collection/collection', '#18 — type name collisions when globbing all sibling XSDs (passes with collection.xsd only)'],
-  ['xmlschema/collection/collection2', '#18 — type name collisions when globbing all sibling XSDs; also, original XML violates xs:key identity constraint on author/@dn'],
-  ['xmlschema/collection/collection3', '#18 — type name collisions when globbing all sibling XSDs; also, original XML violates xs:keyref identity constraint'],
-  ['xmlschema/collection/collection3bis', '#18 — type name collisions when globbing all sibling XSDs (passes with collection3bis.xsd only)'],
-  ['xmlschema/collection/collection4', '#18 — type name collisions when globbing all sibling XSDs (passes with collection4.xsd only)'],
+  ['xmlschema/collection/collection2', 'original XML violates xs:key identity constraint on author/@dn (inherent test data)'],
+  ['xmlschema/collection/collection3', 'original XML violates xs:keyref identity constraint (inherent test data)'],
   ['xmlschema/collection/collection6', '#14 — XSD-level elements like <xs:import> not recognized as document root'],
   ['xmlschema/collection/collection-redef-xmlns', '#18 — type name collisions when globbing all sibling XSDs (passes with collection.xsd only)'],
+  ['xmlschema/menù/menù-ascii', 'XML parser does not support numeric character references in element tag names'],
   ['xmlschema/menù/menù-cp1252', 'serialized XML fails XSD validation — encoding issues in schema file name'],
-
 ]);
 
 function discoverUpstreamCases(): TestCase[] {
@@ -39,9 +36,13 @@ function discoverUpstreamCases(): TestCase[] {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) scanXml(full);
         else if (e.name.endsWith('.xml') && !e.name.includes('error') && !e.name.includes('invalid')) {
+          const stem = e.name.replace(/\.xml$/, '');
+          const matchingXsd = path.join(dir, stem + '.xsd');
+          const xsdFiles = fs.existsSync(matchingXsd) ? [matchingXsd] : allXsdFiles;
+
           cases.push({
             name: `${source.name}/${path.relative(sourcePath, full.replace(/\.xml$/, ''))}`,
-            xsdFiles: allXsdFiles,
+            xsdFiles,
             xmlFile: full,
           });
         }

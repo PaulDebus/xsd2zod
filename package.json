@@ -47,9 +47,11 @@
   "dependencies": {
     "@nodable/compact-builder": "^2.0.0",
     "@nodable/flexible-xml-parser": "^1.10.0",
+    "iconv-lite": "^0.7.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/iconv-lite": "^0.0.1",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "libxml2-wasm": "^0.7.1",
