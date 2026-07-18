@@ -330,18 +330,39 @@ const collectFields = (
     }
 
     if (localTag === 'simpleContent') {
-      const extension = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'extension')?.[1];
-      if (!extension) {
+      const derivation = nodeChildren(child).find(([key]) => {
+        const local = getNodeTagLocalName(key);
+        return local === 'extension' || local === 'restriction';
+      })?.[1];
+      if (!derivation) {
         continue;
       }
-      const baseType = resolveTypeQName(extension['@_base'] ? String(extension['@_base']) : undefined, nsMap);
-      fields.push({
-        ...inheritedCardinality,
-        kind: 'text',
-        qname: toClark(ownerNs, '_text'),
-        typeName: baseType
-      });
-      collectFields(ownerNs, nsMap, formDefaults, extension, fields, choiceGroup, inheritedCardinality, elements, choiceCounter, complexTypes, syntheticTypeContext, groups, attributeGroups, deferredSyntheticTypes);
+      const baseAttr = derivation['@_base'];
+      if (baseAttr && typeof baseAttr === 'string') {
+        const baseType = resolveTypeQName(baseAttr, nsMap);
+        let textType = baseType;
+        const seenAttrs = new Set<string>();
+        let current = complexTypes?.[baseType];
+        while (current) {
+          const tf = current.fields.find(f => f.kind === 'text');
+          if (!tf) break;
+          for (const f of current.fields) {
+            if (f.kind === 'attribute' && !seenAttrs.has(f.qname)) {
+              seenAttrs.add(f.qname);
+              fields.push(f);
+            }
+          }
+          textType = tf.typeName;
+          current = complexTypes?.[textType];
+        }
+        fields.push({
+          ...inheritedCardinality,
+          kind: 'text',
+          qname: toClark(ownerNs, '_text'),
+          typeName: textType
+        });
+      }
+      collectFields(ownerNs, nsMap, formDefaults, derivation, fields, choiceGroup, inheritedCardinality, elements, choiceCounter, complexTypes, syntheticTypeContext, groups, attributeGroups, deferredSyntheticTypes);
       continue;
     }
 
