@@ -495,6 +495,15 @@ const collectFields = (
   }
 };
 
+// Extract the base type of a complexContent/xs:extension derivation, if any.
+const extractExtensionBase = (container: AnyNode, nsMap: Record<string, string>): QName | undefined => {
+  const complexContent = nodeChildren(container).find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
+  const extensionNode = complexContent
+    ? nodeChildren(complexContent).find(([key]) => getNodeTagLocalName(key) === 'extension')?.[1]
+    : undefined;
+  return extensionNode?.['@_base'] ? resolveTypeQName(String(extensionNode['@_base']), nsMap) : undefined;
+};
+
 type DeferredInlineType = {
   typeName: QName;
   container: AnyNode;
@@ -757,12 +766,7 @@ export const parseXsd = (files: string[]): XsdIr => {
       const qname = toClark(effectiveNs, name);
       const fields: IrField[] = [];
       collectFields(effectiveNs, resolveNsMap, fileFormDefaults, child, fields, undefined, undefined, elements, undefined, complexTypes, { targetNs: effectiveNs, counter: syntheticTypeCounter, simpleTypes }, groups, attributeGroups, deferredSyntheticTypes);
-      const extension = nodeChildren(child)
-        .find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
-      const extensionNode = extension
-        ? nodeChildren(extension).find(([key]) => getNodeTagLocalName(key) === 'extension')?.[1]
-        : undefined;
-      const baseType = extensionNode?.['@_base'] ? resolveTypeQName(String(extensionNode['@_base']), resolveNsMap) : undefined;
+      const baseType = extractExtensionBase(child, resolveNsMap);
 
       complexTypes[qname] = { name: qname, fields, baseType };
     }
@@ -820,7 +824,7 @@ export const parseXsd = (files: string[]): XsdIr => {
   const processDeferredType = (typeName: QName, container: AnyNode, ownerNs: string, nsMap: Record<string, string>, formDefaults: SchemaFormDefaults, groups: Record<string, AnyNode>, attributeGroups: Record<string, [string, SchemaFormDefaults, AnyNode]>) => {
     const fields: IrField[] = [];
     collectFields(ownerNs, nsMap, formDefaults, container, fields, undefined, undefined, elements, undefined, complexTypes, { targetNs: ownerNs, counter: syntheticTypeCounter, simpleTypes }, groups, attributeGroups, deferredSyntheticTypes);
-    complexTypes[typeName] = { name: typeName, fields };
+    complexTypes[typeName] = { name: typeName, fields, baseType: extractExtensionBase(container, nsMap) };
   };
 
   for (const { typeName, container, ownerNs, nsMap, formDefaults, groups, attributeGroups } of deferredInlineTypes) {

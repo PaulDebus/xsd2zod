@@ -149,6 +149,74 @@ describe('xsd2zod v1 pipeline', () => {
     });
   });
 
+  it('inherits base-type fields for anonymous inline complexType extensions (#76)', () => {
+    const INLINE_EXT_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:inline-ext" xmlns:t="urn:inline-ext" elementFormDefault="qualified">
+  <xs:complexType name="Base">
+    <xs:sequence>
+      <xs:element name="id" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="version" type="xs:string"/>
+  </xs:complexType>
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="t:Base">
+          <xs:sequence>
+            <xs:element name="title" type="xs:string"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="Wrapper">
+    <xs:sequence>
+      <xs:element name="item">
+        <xs:complexType>
+          <xs:complexContent>
+            <xs:extension base="t:Base">
+              <xs:sequence>
+                <xs:element name="extra" type="xs:string"/>
+              </xs:sequence>
+            </xs:extension>
+          </xs:complexContent>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>`;
+
+    withTempDir((dir) => {
+      const file = path.join(dir, 'schema.xsd');
+      fs.writeFileSync(file, INLINE_EXT_XSD);
+
+      const ir = parseXsd([file]);
+
+      // Top-level element with inline type extending a named base
+      const docType = ir.complexTypes['{urn:inline-ext}anonymous_doc_Type'];
+      expect(docType).toBeDefined();
+      expect(docType.baseType).toBe('{urn:inline-ext}Base');
+      expect(docType.fields.map((f) => f.qname)).toEqual([
+        '{urn:inline-ext}id',
+        '{}version',
+        '{urn:inline-ext}title',
+      ]);
+
+      // Nested inline type (deferredSyntheticTypes path)
+      const wrapper = ir.complexTypes['{urn:inline-ext}Wrapper'];
+      const itemField = wrapper.fields.find((f) => f.qname === '{urn:inline-ext}item');
+      expect(itemField).toBeDefined();
+      const itemType = ir.complexTypes[itemField!.typeName];
+      expect(itemType).toBeDefined();
+      expect(itemType.baseType).toBe('{urn:inline-ext}Base');
+      expect(itemType.fields.map((f) => f.qname)).toEqual([
+        '{urn:inline-ext}id',
+        '{}version',
+        '{urn:inline-ext}extra',
+      ]);
+    });
+  });
+
   it('redefine-by-restriction replaces the original content model', () => {
     const BASE_XSD = `<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:redefine-test" xmlns:t="urn:redefine-test" elementFormDefault="qualified">
