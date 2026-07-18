@@ -1,7 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import iconv from 'iconv-lite';
 import XMLParser from '@nodable/flexible-xml-parser';
+import { readXmlFile } from './readXmlFile.js';
 import type {
   Cardinality,
   ComplexTypeDef,
@@ -117,28 +116,6 @@ const collectNamespaceMap = (schemaNode: AnyNode): Record<string, string> => {
 };
 
 const getNodeTagLocalName = (tag: string): string => splitQName(tag).local;
-
-const readXmlFile = (filePath: string): string => {
-  const raw = fs.readFileSync(filePath);
-  const declMatch = raw.toString('ascii', 0, Math.min(raw.length, 200)).match(/<\?xml\b[^>]*?\bencoding\s*=\s*["']([^"']+)["']/);
-  const encoding = declMatch ? declMatch[1] : 'utf-8';
-  let content: string;
-  try {
-    content = iconv.decode(raw, encoding);
-  } catch {
-    content = raw.toString('utf-8');
-  }
-  // Normalize encoding declaration to UTF-8: after iconv.decode the string is
-  // a JavaScript Unicode string. If we leave the original encoding in the
-  // declaration, libxml2-wasm will try a second conversion (e.g. CP1252→UTF-8)
-  // on the already-decoded content, producing double-encoded garbage.
-  return declMatch
-    ? content.replace(
-        /^(<\?xml\s+[^>]*?)(encoding\s*=\s*["'])([^"']+)(["'][^>]*?\?>)/,
-        (_, pre, attr, _enc, rest) => `${pre}${attr}UTF-8${rest}`
-      )
-    : content;
-};
 
 const readSchema = (
   filePath: string
