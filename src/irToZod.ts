@@ -5,12 +5,13 @@ import type {
   IrField,
   QName,
   RuntimeFieldMetadata,
+  RuntimeMetadata,
   RuntimeRootMetadata,
   RuntimeTypeMetadata,
   XsdIr
 } from './types.js';
 
-const textFieldFor = (typeName: QName): RuntimeFieldMetadata => ({
+export const textFieldFor = (typeName: QName): RuntimeFieldMetadata => ({
   key: '_text',
   kind: 'text',
   qname: `{}_text` as QName,
@@ -86,8 +87,7 @@ const metadataForType = (type: ComplexTypeDef, ir: XsdIr): RuntimeTypeMetadata =
   })
 });
 
-export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
-  const schemaLines: string[] = [];
+export const buildRuntimeMetadata = (ir: XsdIr): RuntimeMetadata => {
   const metadataTypes: RuntimeTypeMetadata[] = Object.values(ir.complexTypes).map(t => metadataForType(t, ir));
   for (const simpleType of Object.values(ir.simpleTypes)) {
     if (simpleType.itemType) {
@@ -110,13 +110,13 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
       });
       continue;
     }
-    const textField = textFieldFor(simpleType.baseType);
+    const tf = textFieldFor(simpleType.baseType);
     if (simpleType.facets) {
-      textField.facets = simpleType.facets;
+      tf.facets = simpleType.facets;
     }
     metadataTypes.push({
       typeName: simpleType.name,
-      fields: [textField],
+      fields: [tf],
       baseType: simpleType.baseType,
       ...(simpleType.facets ? { facets: simpleType.facets } : {})
     });
@@ -125,6 +125,27 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
   for (const type of metadataTypes) {
     typesByQName[type.typeName] = type;
   }
+
+  const rootMetadata: RuntimeRootMetadata[] = ir.rootElements
+    .map((root) => {
+      const rootDef = ir.elements[root];
+      const typeMetadata = metadataTypes.find((type) => type.typeName === rootDef.typeName);
+      return {
+        rootElement: root,
+        typeName: rootDef.typeName,
+        fields: typeMetadata?.fields ?? [textFieldFor(rootDef.typeName)]
+      };
+    });
+
+  return {
+    types: typesByQName,
+    roots: rootMetadata
+  };
+};
+
+export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
+  const schemaLines: string[] = [];
+  const { types: typesByQName, roots: rootMetadata } = buildRuntimeMetadata(ir);
 
   schemaLines.push('// AUTO-GENERATED — DO NOT EDIT');
   schemaLines.push("import { z } from 'zod';");
@@ -259,17 +280,6 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
     const rootDef = ir.elements[root];
     schemaLines.push(`export const ${clarkToLocal(root)}Schema = schemas[${JSON.stringify(rootDef.typeName)}];`);
   }
-
-  const rootMetadata: RuntimeRootMetadata[] = ir.rootElements
-    .map((root) => {
-      const rootDef = ir.elements[root];
-      const typeMetadata = metadataTypes.find((type) => type.typeName === rootDef.typeName);
-      return {
-        rootElement: root,
-        typeName: rootDef.typeName,
-        fields: typeMetadata?.fields ?? [textFieldFor(rootDef.typeName)]
-      };
-    });
 
   return {
     schemas: `${schemaLines.join('\n')}\n`,

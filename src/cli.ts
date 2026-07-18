@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildRuntimeMetadata, irToZod } from './irToZod.js';
 import { parseXsd } from './parseXsd.js';
-import { irToZod } from './irToZod.js';
 import { runPostGenerationFormatting } from './postProcess.js';
+import { readXmlFile } from './readXmlFile.js';
+import { parseXmlWithMetadata } from './runtime.js';
+import type { RuntimeMetadata } from './types.js';
 
 export const USAGE = `xsd2zod — XSD-to-Zod code generator
 
@@ -13,6 +16,7 @@ for XML parsing/serialization round-trips.
 
 Usage:
   xsd2zod <files...> [options]
+  xsd2zod validate <xml-file> [options]
 
 Arguments:
   files                     One or more XSD schema files to process
@@ -27,6 +31,8 @@ Options:
 Examples:
   xsd2zod schema.xsd -o src/generated --format
   xsd2zod types.xsd elements.xsd -n my-api -o src/generated
+  xsd2zod validate data.xml --xsd schema.xsd
+  xsd2zod validate data.xml --metadata my-api.meta.ts
 `;
 
 export type ParseArgsResult =
@@ -89,8 +95,185 @@ export const parseArgs = (args: string[]): ParseArgsResult => {
   return { ok: true, help: false, files, out, name, format };
 };
 
+export const VALIDATE_USAGE = `xsd2zod validate — Validate XML against XSD schema or generated metadata
+
+Usage:
+  xsd2zod validate <xml-file> [options]
+
+Arguments:
+  xml-file                  XML file to validate
+
+Options:
+  -x, --xsd <file>          XSD schema file (generates metadata on the fly)
+  -m, --metadata <file>     Pre-generated .meta.ts file with runtime metadata
+  -r, --root <name>         Root element QName (auto-detected when unambiguous)
+  -h, --help                Show this help message
+
+Examples:
+  xsd2zod validate data.xml --xsd schema.xsd
+  xsd2zod validate data.xml --metadata my-api.meta.ts
+`;
+
+export type ValidateArgsResult =
+  | { ok: true; help: true }
+  | { ok: true; help: false; xmlFile: string; xsdFile?: string; metadataFile?: string; root?: string }
+  | { ok: false; error: string };
+
+export const parseValidateArgs = (args: string[]): ValidateArgsResult => {
+  let xmlFile: string | undefined;
+  let xsdFile: string | undefined;
+  let metadataFile: string | undefined;
+  let root: string | undefined;
+  let i = 0;
+
+  const isFlag = (arg: string): string | undefined => {
+    if (arg === '--help' || arg === '-h') return 'help';
+    if (arg === '--xsd' || arg === '-x') return 'xsd';
+    if (arg === '--metadata' || arg === '-m') return 'metadata';
+    if (arg === '--root' || arg === '-r') return 'root';
+    return undefined;
+  };
+
+  while (i < args.length) {
+    const flag = isFlag(args[i]);
+    if (flag === 'help') {
+      return { ok: true, help: true };
+    } else if (flag === 'xsd') {
+      i++;
+      xsdFile = args[i];
+      if (!xsdFile || isFlag(xsdFile) !== undefined) {
+        return { ok: false, error: '--xsd/-x requires a file argument' };
+      }
+    } else if (flag === 'metadata') {
+      i++;
+      metadataFile = args[i];
+      if (!metadataFile || isFlag(metadataFile) !== undefined) {
+        return { ok: false, error: '--metadata/-m requires a file argument' };
+      }
+    } else if (flag === 'root') {
+      i++;
+      root = args[i];
+      if (!root || isFlag(root) !== undefined) {
+        return { ok: false, error: '--root/-r requires a QName argument' };
+      }
+    } else {
+      xmlFile = args[i];
+    }
+    i++;
+  }
+
+  if (!xmlFile) {
+    return { ok: false, error: 'xml-file is required' };
+  }
+
+  if (xsdFile && metadataFile) {
+    return { ok: false, error: '--xsd and --metadata are mutually exclusive' };
+  }
+
+  if (!xsdFile && !metadataFile) {
+    return { ok: false, error: 'either --xsd or --metadata is required' };
+  }
+
+  return { ok: true, help: false, xmlFile, xsdFile, metadataFile, root };
+};
+
+export const loadMetadataFromMetaTs = (metaFile: string): RuntimeMetadata => {
+  const content = readFileSync(metaFile, 'utf8');
+  let json = content.trim();
+  json = json.replace(/^\/\/.*$/m, '').trim();
+  json = json.replace(/^export\s+const\s+runtimeMetadata\s*=\s*/, '');
+  json = json.replace(/\s*as\s+const\s*;?\s*$/, '');
+  try {
+    return JSON.parse(json) as RuntimeMetadata;
+  } catch (e) {
+    throw new Error(`failed to parse metadata file ${metaFile}: ${(e as Error).message}`);
+  }
+};
+
+class CliError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CliError';
+  }
+}
+
+export const cmdValidate = (args: string[]): void => {
+  const result = parseValidateArgs(args);
+
+  if (!result.ok) {
+    throw new CliError(result.error);
+  }
+
+  if (result.help) {
+    console.log(VALIDATE_USAGE);
+    return;
+  }
+
+  if (!existsSync(result.xmlFile)) {
+    throw new CliError(`xml file not found: ${result.xmlFile}`);
+  }
+
+  let runtimeMetadata: RuntimeMetadata;
+
+  if (result.xsdFile) {
+    if (!existsSync(result.xsdFile)) {
+      throw new CliError(`xsd file not found: ${result.xsdFile}`);
+    }
+    const ir = parseXsd([result.xsdFile]);
+    runtimeMetadata = buildRuntimeMetadata(ir);
+  } else {
+    if (!existsSync(result.metadataFile!)) {
+      throw new CliError(`metadata file not found: ${result.metadataFile}`);
+    }
+    try {
+      runtimeMetadata = loadMetadataFromMetaTs(result.metadataFile!);
+    } catch (e) {
+      throw new CliError((e as Error).message);
+    }
+  }
+
+  const rootQName = result.root;
+  const rootMeta = rootQName
+    ? runtimeMetadata.roots.find((r) => r.rootElement === rootQName)
+    : runtimeMetadata.roots.length === 1
+      ? runtimeMetadata.roots[0]
+      : undefined;
+
+  if (!rootMeta) {
+    if (runtimeMetadata.roots.length === 0) {
+      throw new CliError('no root elements in metadata');
+    } else if (rootQName) {
+      throw new CliError(`root element ${rootQName} not found in metadata`);
+    } else {
+      throw new CliError(`multiple root elements found, use --root to specify one: ${runtimeMetadata.roots.map((r) => r.rootElement).join(', ')}`);
+    }
+  }
+
+  const xml = readXmlFile(result.xmlFile);
+
+  try {
+    const parsed = parseXmlWithMetadata(xml, rootMeta, runtimeMetadata.types);
+    console.log('Validation passed');
+    console.log(JSON.stringify(parsed, null, 2));
+  } catch (e) {
+    throw new CliError(`Validation failed: ${(e as Error).message}`);
+  }
+};
+
 const main = (): void => {
-  const result = parseArgs(process.argv.slice(2));
+  const args = process.argv.slice(2);
+
+  if (args[0] === 'validate') {
+    try {
+      cmdValidate(args.slice(1));
+    } catch (e) {
+      console.error(`error: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  const result = parseArgs(args);
 
   if (!result.ok) {
     console.error(`error: ${result.error}`);
