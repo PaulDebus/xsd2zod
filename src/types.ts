@@ -15,9 +15,24 @@ export type IrField = Cardinality & {
   choiceGroup?: string;
 };
 
+export type Facet =
+  | { kind: 'enumeration'; value: string }
+  | { kind: 'pattern'; value: string }
+  | { kind: 'length'; value: number }
+  | { kind: 'minLength'; value: number }
+  | { kind: 'maxLength'; value: number }
+  | { kind: 'minInclusive'; value: number }
+  | { kind: 'maxInclusive'; value: number }
+  | { kind: 'minExclusive'; value: number }
+  | { kind: 'maxExclusive'; value: number }
+  | { kind: 'totalDigits'; value: number }
+  | { kind: 'fractionDigits'; value: number }
+  | { kind: 'whiteSpace'; value: 'preserve' | 'replace' | 'collapse' };
+
 export type SimpleTypeDef = {
   name: QName;
   baseType: QName;
+  facets?: Facet[];
 };
 
 export type ComplexTypeDef = {
