@@ -260,29 +260,27 @@ export const cmdValidate = (args: string[]): void => {
   }
 };
 
-const main = (): void => {
-  const args = process.argv.slice(2);
-
+export const main = (args: string[]): number => {
   if (args[0] === 'validate') {
     try {
       cmdValidate(args.slice(1));
     } catch (e) {
       console.error(`error: ${(e as Error).message}`);
-      process.exit(1);
+      return 1;
     }
-    process.exit(0);
+    return 0;
   }
 
   const result = parseArgs(args);
 
   if (!result.ok) {
     console.error(`error: ${result.error}`);
-    process.exit(1);
+    return 1;
   }
 
   if (result.help) {
     console.log(USAGE);
-    process.exit(0);
+    return 0;
   }
 
   const { files, out, name, format } = result;
@@ -290,7 +288,7 @@ const main = (): void => {
 
   if (!existsSync(outDir)) {
     console.error(`error: output directory does not exist: ${outDir}`);
-    process.exit(1);
+    return 1;
   }
 
   const ir = parseXsd(files);
@@ -310,8 +308,9 @@ const main = (): void => {
 
   console.log(`Wrote ${zodFile}`);
   console.log(`Wrote ${metaFile}`);
+  return 0;
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main();
+  process.exit(main(process.argv.slice(2)));
 }
