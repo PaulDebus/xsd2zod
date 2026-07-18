@@ -169,7 +169,7 @@ const readValue = (
       return parsePrimitive(entryNode['#text'] ?? entry, field.typeName);
     }
     if (complexType) {
-      return parseTypeFields({}, complexType, namespaceContext, types);
+      return parseTypeFields({ '#text': entry }, complexType, namespaceContext, types);
     }
     return parsePrimitive(entry, field.typeName);
   });
