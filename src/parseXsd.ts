@@ -5,6 +5,7 @@ import type {
   Cardinality,
   ComplexTypeDef,
   ElementDef,
+  Facet,
   IrField,
   QName,
   SimpleTypeDef,
@@ -48,6 +49,31 @@ const fromClark = (qname: QName): { namespace: string; local: string } => {
     return { namespace: '', local: qname };
   }
   return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
+};
+
+const NUMBER_FACETS = new Set(['length', 'minLength', 'maxLength', 'minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive', 'totalDigits', 'fractionDigits']);
+
+const parseFacets = (restrictionNode: AnyNode): Facet[] => {
+  const facets: Facet[] = [];
+  for (const [tag, child] of nodeChildren(restrictionNode)) {
+    const localTag = getNodeTagLocalName(tag);
+    if (localTag === 'enumeration') {
+      const val = child['@_value'];
+      if (val !== undefined) facets.push({ kind: 'enumeration', value: String(val) });
+    } else if (NUMBER_FACETS.has(localTag)) {
+      const val = child['@_value'];
+      if (val !== undefined) facets.push({ kind: localTag as Facet['kind'], value: Number(val) } as Facet);
+    } else if (localTag === 'pattern') {
+      const val = child['@_value'];
+      if (val !== undefined) facets.push({ kind: 'pattern', value: String(val) });
+    } else if (localTag === 'whiteSpace') {
+      const val = child['@_value'];
+      if (val === 'preserve' || val === 'replace' || val === 'collapse') {
+        facets.push({ kind: 'whiteSpace', value: val });
+      }
+    }
+  }
+  return facets;
 };
 
 const resolveTypeQName = (rawType: string | undefined, nsMap: Record<string, string>): QName => {
@@ -533,8 +559,9 @@ export const parseXsd = (files: string[]): XsdIr => {
         if (!name) continue;
         const restriction = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
         const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, resolveNsMap);
+        const facets = restriction ? parseFacets(restriction) : [];
         const qname = toClark(effectiveNs, name);
-        simpleTypes[qname] = { name: qname, baseType };
+        simpleTypes[qname] = { name: qname, baseType, facets: facets.length > 0 ? facets : undefined };
         continue;
       }
 
@@ -673,7 +700,8 @@ export const parseXsd = (files: string[]): XsdIr => {
       } else if (override.kind === 'simpleType') {
         const restriction = nodeChildren(override.node).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
         const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, override.nsMap);
-        simpleTypes[override.qname] = { name: override.qname, baseType };
+        const facets = restriction ? parseFacets(restriction) : [];
+        simpleTypes[override.qname] = { name: override.qname, baseType, facets: facets.length > 0 ? facets : undefined };
       } else if (override.kind === 'group') {
         groups[override.qname] = override.node;
       } else if (override.kind === 'attributeGroup') {

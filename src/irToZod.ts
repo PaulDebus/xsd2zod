@@ -1,6 +1,7 @@
 import { clarkToLocal } from './parseXsd.js';
 import type {
   ComplexTypeDef,
+  Facet,
   IrField,
   QName,
   RuntimeFieldMetadata,
@@ -96,8 +97,78 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
   schemaLines.push("import { z } from 'zod';");
   schemaLines.push('const schemas: Record<string, z.ZodTypeAny> = {};');
 
+  const isStringType = (zodExpr: string): boolean => zodExpr.startsWith('z.string()');
+  const isNumberType = (zodExpr: string): boolean => zodExpr.startsWith('z.number()');
+
+  const withFacets = (base: string, facets: Facet[]): string => {
+    if (!facets.length) return base;
+
+    const enumFacets = facets.filter(f => f.kind === 'enumeration');
+    const otherFacets = facets.filter(f => f.kind !== 'enumeration' && f.kind !== 'whiteSpace');
+
+    if (enumFacets.length > 0 && otherFacets.length === 0) {
+      const values = enumFacets.map(f => f.value);
+      if (isStringType(base)) {
+        return `z.enum([${values.map(v => JSON.stringify(v)).join(', ')}])`;
+      }
+      if (isNumberType(base)) {
+        return `z.union([${values.map(v => `z.literal(${v})`).join(', ')}])`;
+      }
+      return base;
+    }
+
+    let result = base;
+    for (const facet of otherFacets) {
+      switch (facet.kind) {
+        case 'pattern':
+          result += `.regex(new RegExp(${JSON.stringify(facet.value)}))`;
+          break;
+        case 'length':
+          result += `.length(${facet.value})`;
+          break;
+        case 'minLength':
+          result += `.min(${facet.value})`;
+          break;
+        case 'maxLength':
+          result += `.max(${facet.value})`;
+          break;
+        case 'minInclusive':
+          result += `.min(${facet.value})`;
+          break;
+        case 'maxInclusive':
+          result += `.max(${facet.value})`;
+          break;
+        case 'minExclusive':
+          result += `.gt(${facet.value})`;
+          break;
+        case 'maxExclusive':
+          result += `.lt(${facet.value})`;
+          break;
+        case 'totalDigits': {
+          const limit = Math.pow(10, facet.value) - 1;
+          result += `.min(${-limit}).max(${limit})`;
+          break;
+        }
+        case 'fractionDigits': {
+          const step = Math.pow(10, -facet.value);
+          result += `.multipleOf(${step})`;
+          break;
+        }
+      }
+    }
+
+    if (enumFacets.length > 0) {
+      const values = enumFacets.map(f => JSON.stringify(f.value));
+      result += `.refine((val) => [${values.join(', ')}].includes(val))`;
+    }
+
+    return result;
+  };
+
   for (const simpleType of Object.values(ir.simpleTypes)) {
-    schemaLines.push(`schemas[${JSON.stringify(simpleType.name)}] = ${primitiveToZod(simpleType.baseType)};`);
+    const baseExpr = primitiveToZod(simpleType.baseType);
+    const expr = simpleType.facets ? withFacets(baseExpr, simpleType.facets) : baseExpr;
+    schemaLines.push(`schemas[${JSON.stringify(simpleType.name)}] = ${expr};`);
   }
 
   for (const complexType of Object.values(ir.complexTypes)) {

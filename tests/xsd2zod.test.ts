@@ -324,6 +324,263 @@ describe('xsd2zod v1 pipeline', () => {
     });
   });
 
+  describe('simple type facets (#24)', () => {
+    const FACET_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:facets" xmlns:t="urn:facets" elementFormDefault="qualified">
+  <xs:simpleType name="CountryCode">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Z]{2}"/>
+      <xs:length value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="StatusCode">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="active"/>
+      <xs:enumeration value="inactive"/>
+      <xs:enumeration value="pending"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="Quantity">
+    <xs:restriction base="xs:integer">
+      <xs:minInclusive value="1"/>
+      <xs:maxInclusive value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="Price">
+    <xs:restriction base="xs:decimal">
+      <xs:fractionDigits value="2"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="Temperature">
+    <xs:restriction base="xs:decimal">
+      <xs:minExclusive value="-273.15"/>
+      <xs:maxExclusive value="10000"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="ShortCode">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Z0-9]{3,8}"/>
+      <xs:enumeration value="ADM"/>
+      <xs:enumeration value="USR"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="LargeInt">
+    <xs:restriction base="xs:integer">
+      <xs:totalDigits value="5"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="NameType">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="2"/>
+      <xs:maxLength value="50"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="TokenType">
+    <xs:restriction base="xs:string">
+      <xs:whiteSpace value="collapse"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="FacetContainer">
+    <xs:sequence>
+      <xs:element name="country" type="t:CountryCode"/>
+      <xs:element name="status" type="t:StatusCode"/>
+      <xs:element name="qty" type="t:Quantity"/>
+      <xs:element name="price" type="t:Price"/>
+      <xs:element name="temp" type="t:Temperature"/>
+      <xs:element name="code" type="t:ShortCode"/>
+      <xs:element name="big" type="t:LargeInt"/>
+      <xs:element name="name" type="t:NameType"/>
+      <xs:element name="token" type="t:TokenType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="facets" type="t:FacetContainer"/>
+</xs:schema>`;
+
+    const NUM_ENUM_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:numEnum" xmlns:t="urn:numEnum" elementFormDefault="qualified">
+  <xs:simpleType name="Priority">
+    <xs:restriction base="xs:integer">
+      <xs:enumeration value="1"/>
+      <xs:enumeration value="2"/>
+      <xs:enumeration value="3"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="TaskType">
+    <xs:sequence>
+      <xs:element name="priority" type="t:Priority"/>
+      <xs:element name="label" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="task" type="t:TaskType"/>
+</xs:schema>`;
+
+    const runFacetTest = (fn: (dir: string, file: string) => void): void => {
+      withTempDir((dir) => {
+        const file = path.join(dir, 'schema.xsd');
+        fs.writeFileSync(file, FACET_XSD);
+        fn(dir, file);
+      });
+    };
+
+    it('stores facets in IR', () => {
+      runFacetTest((_dir, file) => {
+        const ir = parseXsd([file]);
+        const countryCode = ir.simpleTypes['{urn:facets}CountryCode'];
+        expect(countryCode).toBeDefined();
+        expect(countryCode.facets).toEqual([
+          { kind: 'pattern', value: '[A-Z]{2}' },
+          { kind: 'length', value: 2 },
+        ]);
+
+        const statusCode = ir.simpleTypes['{urn:facets}StatusCode'];
+        expect(statusCode.facets).toEqual([
+          { kind: 'enumeration', value: 'active' },
+          { kind: 'enumeration', value: 'inactive' },
+          { kind: 'enumeration', value: 'pending' },
+        ]);
+
+        const qty = ir.simpleTypes['{urn:facets}Quantity'];
+        expect(qty.facets).toEqual([
+          { kind: 'minInclusive', value: 1 },
+          { kind: 'maxInclusive', value: 100 },
+        ]);
+
+        const nameType = ir.simpleTypes['{urn:facets}NameType'];
+        expect(nameType.facets).toEqual([
+          { kind: 'minLength', value: 2 },
+          { kind: 'maxLength', value: 50 },
+        ]);
+
+        const tokenType = ir.simpleTypes['{urn:facets}TokenType'];
+        expect(tokenType.facets).toEqual([
+          { kind: 'whiteSpace', value: 'collapse' },
+        ]);
+      });
+    });
+
+    it('emits pattern + length for CountryCode', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}CountryCode"] = z.string().regex(new RegExp("[A-Z]{2}")).length(2);'
+        );
+      });
+    });
+
+    it('emits z.enum for StatusCode', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}StatusCode"] = z.enum(["active", "inactive", "pending"]);'
+        );
+      });
+    });
+
+    it('emits min/max for Quantity', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}Quantity"] = z.number().int().min(1).max(100);'
+        );
+      });
+    });
+
+    it('emits multipleOf + min for Price', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}Price"] = z.number().multipleOf(0.01).min(0);'
+        );
+      });
+    });
+
+    it('emits gt/lt for Temperature', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}Temperature"] = z.number().gt(-273.15).lt(10000);'
+        );
+      });
+    });
+
+    it('emits refine for mixed pattern + enumeration', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}ShortCode"] = z.string().regex(new RegExp("[A-Z0-9]{3,8}")).refine((val) => ["ADM", "USR"].includes(val));'
+        );
+      });
+    });
+
+    it('emits totalDigits as min/max bounds', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}LargeInt"] = z.number().int().min(-99999).max(99999);'
+        );
+      });
+    });
+
+    it('emits minLength/maxLength for NameType', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}NameType"] = z.string().min(2).max(50);'
+        );
+      });
+    });
+
+    it('ignores whiteSpace facet (no Zod equivalent)', () => {
+      runFacetTest((_dir, file) => {
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:facets}TokenType"] = z.string();'
+        );
+      });
+    });
+
+    it('emits z.union of z.literal for numeric enum', () => {
+      withTempDir((dir) => {
+        const file = path.join(dir, 'num-enum.xsd');
+        fs.writeFileSync(file, NUM_ENUM_XSD);
+        const generated = irToZod(parseXsd([file]));
+        expect(generated.schemas).toContain(
+          'schemas["{urn:numEnum}Priority"] = z.union([z.literal(1), z.literal(2), z.literal(3)]);'
+        );
+      });
+    });
+
+    it('round-trips facet-constrained data', () => {
+      runFacetTest((_dir, file) => {
+        const ir = parseXsd([file]);
+        const generated = irToZod(ir);
+        const runtimeMetadata = extractRuntimeMetadata(generated.metadata);
+
+        const rootMeta = runtimeMetadata.roots.find(r => r.rootElement.endsWith('}facets'));
+        expect(rootMeta).toBeDefined();
+
+        const { parseXml, serializeXml } = createRootHelpers<Record<string, unknown>>(rootMeta!, runtimeMetadata.types);
+
+        const xml = `<facets xmlns="urn:facets"><country>DE</country><status>active</status><qty>42</qty><price>19.99</price><temp>25.5</temp><code>ADM</code><big>12345</big><name>Alice</name><token>hello</token></facets>`;
+        const parsed = parseXml(xml);
+        expect(parsed.country).toEqual({ _text: 'DE' });
+        expect(parsed.status).toEqual({ _text: 'active' });
+        expect(parsed.qty).toEqual({ _text: 42 });
+        expect(parsed.price).toEqual({ _text: 19.99 });
+        expect(parsed.temp).toEqual({ _text: 25.5 });
+        expect(parsed.code).toEqual({ _text: 'ADM' });
+        expect(parsed.big).toEqual({ _text: 12345 });
+        expect(parsed.name).toEqual({ _text: 'Alice' });
+        expect(parsed.token).toEqual({ _text: 'hello' });
+
+        const serialized = serializeXml(parsed);
+        const reparsed = parseXml(serialized);
+        expect(reparsed).toEqual(parsed);
+      });
+    });
+  });
+
   it('wraps cyclic complex types in z.lazy so generated module loads without ReferenceError (#31)', async () => {
     const CYCLIC_XSD = `<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:cyclic" xmlns:t="urn:cyclic" elementFormDefault="qualified">
