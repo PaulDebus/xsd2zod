@@ -230,6 +230,17 @@ const parsePrimitive = (raw: unknown, typeName: string, facets?: Facet[]): unkno
       break;
     case 'int':
     case 'integer':
+    case 'long':
+    case 'short':
+    case 'byte':
+    case 'nonNegativeInteger':
+    case 'nonPositiveInteger':
+    case 'negativeInteger':
+    case 'positiveInteger':
+    case 'unsignedLong':
+    case 'unsignedInt':
+    case 'unsignedShort':
+    case 'unsignedByte':
       if (!INTEGER_LEXICAL.test(text)) {
         throw new Error(`Invalid xs:${local} lexical: ${JSON.stringify(text)}`);
       }

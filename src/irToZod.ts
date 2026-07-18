@@ -35,6 +35,17 @@ const primitiveToZod = (typeName: QName, definedTypes: Set<string>): string => {
       return 'z.boolean()';
     case 'int':
     case 'integer':
+    case 'long':
+    case 'short':
+    case 'byte':
+    case 'nonNegativeInteger':
+    case 'nonPositiveInteger':
+    case 'negativeInteger':
+    case 'positiveInteger':
+    case 'unsignedLong':
+    case 'unsignedInt':
+    case 'unsignedShort':
+    case 'unsignedByte':
       return 'z.number().int()';
     case 'decimal':
     case 'float':
