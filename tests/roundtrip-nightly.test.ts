@@ -6,12 +6,7 @@ import { parseXsd } from '../src/index.js';
 
 const W3C_DIR = path.resolve('testdata/upstream/w3c-xsdtests');
 
-const KNOWN_FAILURES = new Map<string, string>([
-  ['boeingData/ipo3/ipo_1.xml', 'chameleon include (itematt.xsd no targetNamespace) — attributeGroup namespace mismatch'],
-  ['boeingData/ipo3/ipo_2.xml', 'chameleon include (itematt.xsd no targetNamespace) — attributeGroup namespace mismatch'],
-  ['boeingData/ipo4/ipo_1.xml', 'xs:redefine not supported — AddressType missing country element'],
-  ['boeingData/ipo4/ipo_2.xml', 'xs:redefine not supported — AddressType missing country element'],
-]);
+const KNOWN_FAILURES = new Map<string, string>([]);
 
 describe('nightly round-trip (W3C smoke)', () => {
   if (!fs.existsSync(W3C_DIR) || fs.readdirSync(W3C_DIR).length === 0) {

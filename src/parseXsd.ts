@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import iconv from 'iconv-lite';
 import XMLParser from '@nodable/flexible-xml-parser';
 import type {
   Cardinality,
@@ -117,10 +118,21 @@ const collectNamespaceMap = (schemaNode: AnyNode): Record<string, string> => {
 
 const getNodeTagLocalName = (tag: string): string => splitQName(tag).local;
 
+const readXmlFile = (filePath: string): string => {
+  const raw = fs.readFileSync(filePath);
+  const declMatch = raw.toString('ascii', 0, Math.min(raw.length, 200)).match(/<\?xml\b[^>]*?\bencoding\s*=\s*["']([^"']+)["']/);
+  const encoding = declMatch ? declMatch[1] : 'utf-8';
+  try {
+    return iconv.decode(raw, encoding);
+  } catch {
+    return raw.toString('utf-8');
+  }
+};
+
 const readSchema = (
   filePath: string
 ): { schemaNode: AnyNode; nsMap: Record<string, string>; targetNs: string; formDefaults: SchemaFormDefaults } => {
-  const xml = fs.readFileSync(filePath, 'utf8');
+  const xml = readXmlFile(filePath);
   const parsed = parser.parse(xml) as Record<string, AnyNode>;
   const schemaEntry = Object.entries(parsed).find(([key]) => getNodeTagLocalName(key) === 'schema');
   if (!schemaEntry) {
@@ -346,11 +358,14 @@ const collectFields = (
     }
 
     if (localTag === 'complexContent') {
-      const extension = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'extension')?.[1];
-      if (!extension) {
+      const derivation = nodeChildren(child).find(([key]) => {
+        const local = getNodeTagLocalName(key);
+        return local === 'extension' || local === 'restriction';
+      })?.[1];
+      if (!derivation) {
         continue;
       }
-      collectFields(ownerNs, nsMap, formDefaults, extension, fields, choiceGroup, inheritedCardinality, elements, choiceCounter, complexTypes, syntheticTypeContext, groups, attributeGroups, deferredSyntheticTypes);
+      collectFields(ownerNs, nsMap, formDefaults, derivation, fields, choiceGroup, inheritedCardinality, elements, choiceCounter, complexTypes, syntheticTypeContext, groups, attributeGroups, deferredSyntheticTypes);
     }
   }
 };
@@ -365,9 +380,22 @@ type DeferredInlineType = {
   attributeGroups: Record<string, [string, SchemaFormDefaults, AnyNode]>;
 };
 
+type QueueEntry = {
+  file: string;
+  inheritedTargetNs?: string;
+};
+
+type RedefineOverride = {
+  kind: 'complexType' | 'simpleType' | 'group' | 'attributeGroup';
+  qname: QName;
+  node: AnyNode;
+  nsMap: Record<string, string>;
+  targetNs: string;
+  formDefaults: SchemaFormDefaults;
+};
+
 export const parseXsd = (files: string[]): XsdIr => {
-  const visited = new Set<string>();
-  const queue = files.map((file) => path.resolve(file));
+  const queue: QueueEntry[] = files.map((file) => ({ file: path.resolve(file) }));
 
   const simpleTypes: Record<string, SimpleTypeDef> = {};
   const complexTypes: Record<string, ComplexTypeDef> = {};
@@ -380,40 +408,123 @@ export const parseXsd = (files: string[]): XsdIr => {
   const groups: Record<string, AnyNode> = {};
   const attributeGroups: Record<string, [string, SchemaFormDefaults, AnyNode]> = {};
 
-  while (queue.length > 0) {
-    const file = queue.shift();
-    if (!file || visited.has(file)) {
-      continue;
+  // Build import/include graph for topological sorting
+  const depGraph: Map<string, string[]> = new Map();
+
+  const addDependency = (from: string, to: string): void => {
+    const resolvedFrom = path.resolve(from);
+    const resolvedTo = path.resolve(to);
+    if (!depGraph.has(resolvedFrom)) depGraph.set(resolvedFrom, []);
+    depGraph.get(resolvedFrom)!.push(resolvedTo);
+  };
+
+  // First pass: collect all files and their dependencies
+  const allFiles: Array<{ entry: QueueEntry; schemaNode: AnyNode; nsMap: Record<string, string>; targetNs: string; formDefaults: SchemaFormDefaults }> = [];
+
+  {
+    const pending = new Map<string, QueueEntry>();
+    for (const qe of queue) pending.set(qe.file, qe);
+    const scanned = new Set<string>();
+
+    while (pending.size > 0) {
+      const firstKey = pending.keys().next().value as string;
+      const entry = pending.get(firstKey)!;
+      pending.delete(firstKey);
+      if (scanned.has(entry.file)) continue;
+      scanned.add(entry.file);
+
+      const { schemaNode, nsMap, targetNs, formDefaults } = readSchema(entry.file);
+      allFiles.push({ entry, schemaNode, nsMap, targetNs, formDefaults });
+
+      for (const [tag, child] of nodeChildren(schemaNode)) {
+        const localTag = getNodeTagLocalName(tag);
+        const schemaLocation = child['@_schemaLocation'] ? String(child['@_schemaLocation']) : '';
+        if (!schemaLocation) continue;
+
+        const resolved = path.resolve(path.dirname(entry.file), schemaLocation);
+        addDependency(entry.file, resolved);
+        if (scanned.has(resolved)) continue;
+
+        if (localTag === 'import' || localTag === 'include' || localTag === 'redefine') {
+          // TODO: chameleon includes (no targetNamespace) are scanned once under a single
+          // inheritedTargetNs. If a chameleon schema is included by multiple schemas with
+          // different target namespaces, only one includer's namespace is honored; the
+          // others will produce dangling type references. Properly supporting this requires
+          // scanning the chameleon file once per distinct inherited namespace.
+          const existing = pending.get(resolved);
+          if (existing) {
+            if (localTag === 'include') {
+              existing.inheritedTargetNs = targetNs || entry.inheritedTargetNs || '';
+            }
+          } else {
+            pending.set(resolved, {
+              file: resolved,
+              inheritedTargetNs: localTag === 'include' ? (targetNs || entry.inheritedTargetNs || '') : undefined,
+            });
+          }
+        }
+      }
     }
-    visited.add(file);
+  }
 
-    const { schemaNode, nsMap, targetNs, formDefaults } = readSchema(file);
-    targetNamespaces.add(targetNs);
+  // Topological sort based on dependency graph
+  const sorted: string[] = [];
+  const permanent = new Set<string>();
+  const temporary = new Set<string>();
+
+  const visit = (node: string): void => {
+    if (permanent.has(node)) return;
+    if (temporary.has(node)) return;
+    temporary.add(node);
+    const deps = depGraph.get(node) || [];
+    for (const dep of deps) {
+      visit(dep);
+    }
+    temporary.delete(node);
+    permanent.add(node);
+    sorted.push(node);
+  };
+
+  for (const f of allFiles) {
+    visit(f.entry.file);
+  }
+
+  // Re-order allFiles to match topological order
+  allFiles.sort((a, b) => {
+    const ai = sorted.indexOf(a.entry.file);
+    const bi = sorted.indexOf(b.entry.file);
+    return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+  });
+
+  // Collect redefine overrides keyed by the included schema file path
+  const redefineOverrides: Map<string, RedefineOverride[]> = new Map();
+
+  for (const { entry, schemaNode, nsMap: fileNsMap, targetNs: fileTargetNs, formDefaults: fileFormDefaults } of allFiles) {
+    const effectiveNs = fileTargetNs || entry.inheritedTargetNs || '';
+
+    if (!fileNsMap[''] && entry.inheritedTargetNs) {
+      fileNsMap[''] = entry.inheritedTargetNs;
+    }
+
+    const resolveNsMap = { ...fileNsMap, '': effectiveNs || fileNsMap[''] || '' };
+
     const schemaChildren = nodeChildren(schemaNode);
-
     const elementNodes: Array<{ node: AnyNode }> = [];
     const complexTypeNodes: Array<{ node: AnyNode }> = [];
-
     // Pass 1: collect all declarations before processing fields
     for (const [tag, child] of schemaChildren) {
       const localTag = getNodeTagLocalName(tag);
 
-      if (localTag === 'import' || localTag === 'include') {
-        const schemaLocation = child['@_schemaLocation'] ? String(child['@_schemaLocation']) : '';
-        if (schemaLocation) {
-          queue.push(path.resolve(path.dirname(file), schemaLocation));
-        }
+      if (localTag === 'import' || localTag === 'include' || localTag === 'redefine') {
         continue;
       }
 
       if (localTag === 'simpleType') {
         const name = String(child['@_name'] ?? '');
-        if (!name) {
-          continue;
-        }
+        if (!name) continue;
         const restriction = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
-        const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, nsMap);
-        const qname = toClark(targetNs, name);
+        const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, resolveNsMap);
+        const qname = toClark(effectiveNs, name);
         simpleTypes[qname] = { name: qname, baseType };
         continue;
       }
@@ -431,7 +542,7 @@ export const parseXsd = (files: string[]): XsdIr => {
       if (localTag === 'group') {
         const name = String(child['@_name'] ?? '');
         if (!name) continue;
-        const qname = toClark(targetNs, name);
+        const qname = toClark(effectiveNs, name);
         groups[qname] = child;
         continue;
       }
@@ -439,25 +550,53 @@ export const parseXsd = (files: string[]): XsdIr => {
       if (localTag === 'attributeGroup') {
         const name = String(child['@_name'] ?? '');
         if (!name) continue;
-        const qname = toClark(targetNs, name);
-        attributeGroups[qname] = [targetNs, formDefaults, child];
+        const qname = toClark(effectiveNs, name);
+        attributeGroups[qname] = [effectiveNs, fileFormDefaults, child];
         continue;
       }
     }
 
-    // Pass 2: process top-level elements (populates `elements` for ref resolution)
+    // Collect redefine overrides (children of xs:redefine elements)
+    for (const [tag, child] of schemaChildren) {
+      const localTag = getNodeTagLocalName(tag);
+      if (localTag === 'redefine') {
+        for (const [rtag, rchild] of nodeChildren(child)) {
+          const rlocal = getNodeTagLocalName(rtag);
+          const rname = String(rchild['@_name'] ?? '');
+          if (!rname) continue;
+          if (rlocal === 'complexType' || rlocal === 'simpleType' || rlocal === 'group' || rlocal === 'attributeGroup') {
+            const rqname = toClark(effectiveNs, rname);
+            const schemaLocation = child['@_schemaLocation'] ? String(child['@_schemaLocation']) : '';
+            if (schemaLocation) {
+              const resolved = path.resolve(path.dirname(entry.file), schemaLocation);
+              if (!redefineOverrides.has(resolved)) redefineOverrides.set(resolved, []);
+              redefineOverrides.get(resolved)!.push({
+                kind: rlocal,
+                qname: rqname,
+                node: rchild,
+                nsMap: resolveNsMap,
+                targetNs: effectiveNs,
+                formDefaults: fileFormDefaults,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Pass 2: process top-level elements
     for (const { node: child } of elementNodes) {
       const name = String(child['@_name'] ?? '');
       if (!name) continue;
 
-      let typeName = child['@_type'] ? resolveTypeQName(String(child['@_type']), { ...nsMap, '': targetNs }) : undefined;
+      let typeName = child['@_type'] ? resolveTypeQName(String(child['@_type']), { ...resolveNsMap, '': effectiveNs }) : undefined;
 
       if (!typeName) {
         const inlineComplex = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'complexType')?.[1];
         if (inlineComplex) {
-          typeName = toClark(targetNs, `anonymous_${name}_Type`);
+          typeName = toClark(effectiveNs, `anonymous_${name}_Type`);
           complexTypes[typeName] = { name: typeName, fields: [] };
-          deferredInlineTypes.push({ typeName, container: inlineComplex, ownerNs: targetNs, nsMap, formDefaults, groups, attributeGroups });
+          deferredInlineTypes.push({ typeName, container: inlineComplex, ownerNs: effectiveNs, nsMap: resolveNsMap, formDefaults: fileFormDefaults, groups, attributeGroups });
         }
       }
 
@@ -465,7 +604,7 @@ export const parseXsd = (files: string[]): XsdIr => {
         typeName = toClark(XSD_NS, 'string');
       }
 
-      const qname = toClark(targetNs, name);
+      const qname = toClark(effectiveNs, name);
       elements[qname] = {
         name: qname,
         typeName,
@@ -475,21 +614,62 @@ export const parseXsd = (files: string[]): XsdIr => {
       rootElements.push(qname);
     }
 
-    // Pass 3: process complex types (elements now available for ref resolution)
+    // Pass 3: process complex types
     for (const { node: child } of complexTypeNodes) {
       const name = String(child['@_name'] ?? '');
       if (!name) continue;
-      const qname = toClark(targetNs, name);
+      const qname = toClark(effectiveNs, name);
       const fields: IrField[] = [];
-      collectFields(targetNs, nsMap, formDefaults, child, fields, undefined, undefined, elements, undefined, complexTypes, { targetNs, counter: syntheticTypeCounter }, groups, attributeGroups, deferredSyntheticTypes);
+      collectFields(effectiveNs, resolveNsMap, fileFormDefaults, child, fields, undefined, undefined, elements, undefined, complexTypes, { targetNs: effectiveNs, counter: syntheticTypeCounter }, groups, attributeGroups, deferredSyntheticTypes);
       const extension = nodeChildren(child)
         .find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
       const extensionNode = extension
         ? nodeChildren(extension).find(([key]) => getNodeTagLocalName(key) === 'extension')?.[1]
         : undefined;
-      const baseType = extensionNode?.['@_base'] ? resolveTypeQName(String(extensionNode['@_base']), nsMap) : undefined;
+      const baseType = extensionNode?.['@_base'] ? resolveTypeQName(String(extensionNode['@_base']), resolveNsMap) : undefined;
 
       complexTypes[qname] = { name: qname, fields, baseType };
+    }
+  }
+
+  // Apply redefine overrides — replace or augment types in the included schemas
+  for (const [, overrides] of redefineOverrides) {
+    for (const override of overrides) {
+      if (override.kind === 'complexType') {
+        const fields: IrField[] = [];
+        collectFields(override.targetNs, override.nsMap, override.formDefaults, override.node, fields, undefined, undefined, elements, undefined, complexTypes, { targetNs: override.targetNs, counter: syntheticTypeCounter }, groups, attributeGroups, deferredSyntheticTypes);
+        const complexContent = nodeChildren(override.node)
+          .find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
+        const derivationEntry = complexContent
+          ? nodeChildren(complexContent).find(([key]) => {
+              const local = getNodeTagLocalName(key);
+              return local === 'extension' || local === 'restriction';
+            })
+          : undefined;
+        const derivationKind = derivationEntry ? getNodeTagLocalName(derivationEntry[0]) : undefined;
+        const derivationNode = derivationEntry?.[1];
+        const baseType = derivationNode?.['@_base'] ? resolveTypeQName(String(derivationNode['@_base']), override.nsMap) : undefined;
+        if (baseType === override.qname && derivationKind === 'extension') {
+          const original = complexTypes[override.qname];
+          if (original) {
+            complexTypes[override.qname] = { name: override.qname, fields: [...original.fields, ...fields], baseType: original.baseType };
+          } else {
+            complexTypes[override.qname] = { name: override.qname, fields, baseType: undefined };
+          }
+        } else if (baseType === override.qname && derivationKind === 'restriction') {
+          complexTypes[override.qname] = { name: override.qname, fields, baseType: undefined };
+        } else {
+          complexTypes[override.qname] = { name: override.qname, fields, baseType };
+        }
+      } else if (override.kind === 'simpleType') {
+        const restriction = nodeChildren(override.node).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
+        const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, override.nsMap);
+        simpleTypes[override.qname] = { name: override.qname, baseType };
+      } else if (override.kind === 'group') {
+        groups[override.qname] = override.node;
+      } else if (override.kind === 'attributeGroup') {
+        attributeGroups[override.qname] = [override.targetNs, override.formDefaults, override.node];
+      }
     }
   }
 

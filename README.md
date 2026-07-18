@@ -72,8 +72,10 @@ const data = parseXml(`
 
 ## Features
 
-- **XSD constructs**: `sequence`, `choice` (→ `z.discriminatedUnion`), `all`, `attribute`, `simpleContent`, `complexContent` (extension flattening)
+- **XSD constructs**: `sequence`, `choice` (→ `z.discriminatedUnion`), `all`, `attribute`, `simpleContent`, `complexContent` (extension flattening), `xs:group`, `xs:attributeGroup`, `xs:redefine`
 - **Namespaces**: Clark notation `{ns}local` throughout, qualified/unqualified form defaults, `xs:include`/`xs:import` across files
+- **Chameleon includes**: inherited target namespace for includee schemas without a `targetNamespace`
+- **Encoding detection**: automatic CP1252 / UTF-8 detection via BOM and heuristic; `iconv-lite` for decoding
 - **Cardinality**: `minOccurs`/`maxOccurs` → `z.array()` / `.optional()`, `unbounded`
 - **Nillable**: `xsi:nil="true"` → `.nullable()` in schema, round-trips through `serializeXml`
 - **Element refs**: `<xs:element ref="t:global"/>` resolved via global element declarations
@@ -158,13 +160,13 @@ Run it locally:
 npm test
 ```
 
-**Test matrix** (~77 tests, ~8 s):
+**Test matrix** (~78 tests, ~10 s):
 
 | Category | Count | What it covers |
 |----------|------:|----------------|
-| Curated round-trip | 22 (21 ✅) | Basic declarations, content models, cardinality, types, namespaces, imports — serialized XML validated against libxml2 |
-| Upstream round-trip | 17 (2 ✅) | [`xmlschema`](https://github.com/brunato/xmlschema) examples + OASIS UBL Invoice/Order — serialized XML validated against libxml2 |
-| W3C smoke | 8 (0 ✅) | Boeing IPO variants via [w3c/xsdtests](https://github.com/w3c/xsdtests) submodule — serialized XML validated against libxml2 |
+| Curated round-trip | 23 (23 ✅) | Basic declarations, content models, cardinality, types, namespaces, imports — serialized XML validated against libxml2 |
+| Upstream round-trip | 17 (10 ✅, 7 ⏭️) | [`xmlschema`](https://github.com/brunato/xmlschema) examples + OASIS UBL Invoice/Order — serialized XML validated against libxml2 |
+| W3C smoke | 8 (4 ✅, 4 ⏭️) | Boeing IPO variants via [w3c/xsdtests](https://github.com/w3c/xsdtests) submodule — serialized XML validated against libxml2 |
 | Pipeline / CLI | 22 | CLI entry point (16), code generation + runtime unit tests (6) |
 | Benchmark | 1 | Parses all upstream XSDs in under 5 s |
 | Negative | 7 | Namespace rejection and graceful handling of lenient validation |
@@ -184,11 +186,9 @@ Full license attributions in [`testdata/THIRD_PARTY_NOTICES.md`](testdata/THIRD_
 - `xs:any` / `xs:anyAttribute` wildcards are not supported
 - Attribute `ref` is parsed but type defaults to `xs:string` (global attribute declarations not collected)
 - Mixed content models are not supported
+- The XML parser (`@nodable/flexible-xml-parser`) does not support numeric character references in element tag names
 
 ### Known gaps (tracked as GitHub issues)
 
-- [#9] — `irToZod` omits runtime metadata for root elements with primitive/simple types
 - [#10] — generated Zod schemas don't enforce cardinality, order, or unexpected elements
-- [#35] — `elementFormDefault="unqualified"` not handled in parser/serializer (caught by libxml2 XSD validation)
-- [#36] — Anonymous inline complex types on root elements not handled by runtime (caught by libxml2 XSD validation)
 - [#37] — UBL schema round-trip validation failures (caught by libxml2 XSD validation)
