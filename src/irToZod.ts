@@ -90,6 +90,26 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
   const schemaLines: string[] = [];
   const metadataTypes: RuntimeTypeMetadata[] = Object.values(ir.complexTypes).map(t => metadataForType(t, ir));
   for (const simpleType of Object.values(ir.simpleTypes)) {
+    if (simpleType.itemType) {
+      metadataTypes.push({
+        typeName: simpleType.name,
+        fields: [],
+        baseType: simpleType.baseType,
+        listItemType: simpleType.itemType,
+        ...(simpleType.facets ? { facets: simpleType.facets } : {})
+      });
+      continue;
+    }
+    if (simpleType.memberTypes) {
+      metadataTypes.push({
+        typeName: simpleType.name,
+        fields: [],
+        baseType: simpleType.baseType,
+        unionMemberTypes: simpleType.memberTypes,
+        ...(simpleType.facets ? { facets: simpleType.facets } : {})
+      });
+      continue;
+    }
     const textField = textFieldFor(simpleType.baseType);
     if (simpleType.facets) {
       textField.facets = simpleType.facets;
@@ -97,6 +117,7 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
     metadataTypes.push({
       typeName: simpleType.name,
       fields: [textField],
+      baseType: simpleType.baseType,
       ...(simpleType.facets ? { facets: simpleType.facets } : {})
     });
   }
@@ -178,6 +199,16 @@ export const irToZod = (ir: XsdIr): { schemas: string; metadata: string } => {
   };
 
   for (const simpleType of Object.values(ir.simpleTypes)) {
+    if (simpleType.itemType) {
+      const itemExpr = primitiveToZod(simpleType.itemType);
+      schemaLines.push(`schemas[${JSON.stringify(simpleType.name)}] = z.preprocess((v) => typeof v === "string" ? v.trim().split(/\\s+/) : v, z.array(${itemExpr}));`);
+      continue;
+    }
+    if (simpleType.memberTypes) {
+      const memberExprs = simpleType.memberTypes.map(mt => primitiveToZod(mt));
+      schemaLines.push(`schemas[${JSON.stringify(simpleType.name)}] = z.union([${memberExprs.join(', ')}]);`);
+      continue;
+    }
     const baseExpr = primitiveToZod(simpleType.baseType);
     const expr = simpleType.facets ? withFacets(baseExpr, simpleType.facets) : baseExpr;
     schemaLines.push(`schemas[${JSON.stringify(simpleType.name)}] = ${expr};`);

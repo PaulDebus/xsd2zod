@@ -87,6 +87,24 @@ const resolveTypeQName = (rawType: string | undefined, nsMap: Record<string, str
   return toClark(nsMap[prefix] ?? '', local);
 };
 
+const resolveInlineSimpleType = (
+  node: AnyNode,
+  nsMap: Record<string, string>,
+  simpleTypes: Record<string, SimpleTypeDef>,
+  syntheticName: QName
+): QName => {
+  const restriction = nodeChildren(node).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
+  if (!restriction) return toClark(XSD_NS, 'string');
+  const baseType = resolveTypeQName(String(restriction['@_base'] ?? ''), nsMap);
+  const facets = parseFacets(restriction);
+  simpleTypes[syntheticName] = {
+    name: syntheticName,
+    baseType,
+    facets: facets.length > 0 ? facets : undefined
+  };
+  return syntheticName;
+};
+
 const parseCardinality = (node: AnyNode): Cardinality => {
   const rawMin = node['@_minOccurs'];
   const rawMax = node['@_maxOccurs'];
@@ -565,10 +583,43 @@ export const parseXsd = (files: string[]): XsdIr => {
       if (localTag === 'simpleType') {
         const name = String(child['@_name'] ?? '');
         if (!name) continue;
+        const qname = toClark(effectiveNs, name);
+
+        const listChild = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'list')?.[1];
+        if (listChild) {
+          const itemTypeRaw = listChild['@_itemType'];
+          let itemType: QName;
+          if (itemTypeRaw) {
+            itemType = resolveTypeQName(String(itemTypeRaw), resolveNsMap);
+          } else {
+            const inlineSimple = nodeChildren(listChild).find(([key]) => getNodeTagLocalName(key) === 'simpleType')?.[1];
+            itemType = inlineSimple
+              ? resolveInlineSimpleType(inlineSimple, resolveNsMap, simpleTypes, `${qname}_itemType` as QName)
+              : toClark(XSD_NS, 'string');
+          }
+          simpleTypes[qname] = { name: qname, baseType: itemType, itemType };
+          continue;
+        }
+
+        const unionChild = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'union')?.[1];
+        if (unionChild) {
+          const memberTypesRaw = unionChild['@_memberTypes'];
+          let memberTypes: QName[];
+          if (memberTypesRaw) {
+            memberTypes = String(memberTypesRaw).split(/\s+/).map(mt => resolveTypeQName(mt, resolveNsMap));
+          } else {
+            memberTypes = nodeChildren(unionChild)
+              .filter(([key]) => getNodeTagLocalName(key) === 'simpleType')
+              .map(([, stNode], idx) => resolveInlineSimpleType(stNode, resolveNsMap, simpleTypes, `${qname}_member${idx}` as QName));
+          }
+          const baseType = memberTypes[0] ?? toClark(XSD_NS, 'string');
+          simpleTypes[qname] = { name: qname, baseType, memberTypes };
+          continue;
+        }
+
         const restriction = nodeChildren(child).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
         const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, resolveNsMap);
         const facets = restriction ? parseFacets(restriction) : [];
-        const qname = toClark(effectiveNs, name);
         simpleTypes[qname] = { name: qname, baseType, facets: facets.length > 0 ? facets : undefined };
         continue;
       }
@@ -706,6 +757,47 @@ export const parseXsd = (files: string[]): XsdIr => {
           complexTypes[override.qname] = { name: override.qname, fields, baseType };
         }
       } else if (override.kind === 'simpleType') {
+        // Drop synthetic inline item/member types created for the previous definition
+        // so swapping list ↔ union (or changing item/member shape) does not leave orphans.
+        const orphanPrefix = `${override.qname}_`;
+        for (const existingName of Object.keys(simpleTypes)) {
+          if (existingName.startsWith(orphanPrefix)) {
+            delete simpleTypes[existingName];
+          }
+        }
+
+        const listChild = nodeChildren(override.node).find(([key]) => getNodeTagLocalName(key) === 'list')?.[1];
+        if (listChild) {
+          const itemTypeRaw = listChild['@_itemType'];
+          let itemType: QName;
+          if (itemTypeRaw) {
+            itemType = resolveTypeQName(String(itemTypeRaw), override.nsMap);
+          } else {
+            const inlineSimple = nodeChildren(listChild).find(([key]) => getNodeTagLocalName(key) === 'simpleType')?.[1];
+            itemType = inlineSimple
+              ? resolveInlineSimpleType(inlineSimple, override.nsMap, simpleTypes, `${override.qname}_itemType` as QName)
+              : toClark(XSD_NS, 'string');
+          }
+          simpleTypes[override.qname] = { name: override.qname, baseType: itemType, itemType };
+          continue;
+        }
+
+        const unionChild = nodeChildren(override.node).find(([key]) => getNodeTagLocalName(key) === 'union')?.[1];
+        if (unionChild) {
+          const memberTypesRaw = unionChild['@_memberTypes'];
+          let memberTypes: QName[];
+          if (memberTypesRaw) {
+            memberTypes = String(memberTypesRaw).split(/\s+/).map(mt => resolveTypeQName(mt, override.nsMap));
+          } else {
+            memberTypes = nodeChildren(unionChild)
+              .filter(([key]) => getNodeTagLocalName(key) === 'simpleType')
+              .map(([, stNode], idx) => resolveInlineSimpleType(stNode, override.nsMap, simpleTypes, `${override.qname}_member${idx}` as QName));
+          }
+          const baseType = memberTypes[0] ?? toClark(XSD_NS, 'string');
+          simpleTypes[override.qname] = { name: override.qname, baseType, memberTypes };
+          continue;
+        }
+
         const restriction = nodeChildren(override.node).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
         const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, override.nsMap);
         const facets = restriction ? parseFacets(restriction) : [];

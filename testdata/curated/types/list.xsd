@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:simpleType name="TokenList">
+    <xs:list itemType="xs:token"/>
+  </xs:simpleType>
+  <xs:complexType name="ListContainer">
+    <xs:sequence>
+      <xs:element name="items" type="t:TokenList"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="listContainer" type="t:ListContainer"/>
+</xs:schema>
