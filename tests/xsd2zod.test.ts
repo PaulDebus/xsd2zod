@@ -255,6 +255,84 @@ describe('xsd2zod v1 pipeline', () => {
     });
   });
 
+  it('parses inline xs:simpleType on elements and attributes into synthetic simple types (#75)', () => {
+    const INLINE_SIMPLE_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:inline-simple" xmlns:t="urn:inline-simple" elementFormDefault="qualified">
+  <xs:element name="age">
+    <xs:simpleType>
+      <xs:restriction base="xs:integer">
+        <xs:minInclusive value="0"/>
+        <xs:maxInclusive value="150"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+  <xs:complexType name="Person">
+    <xs:sequence>
+      <xs:element name="nickname">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:maxLength value="20"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="status">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="active"/>
+          <xs:enumeration value="inactive"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:element name="person" type="t:Person"/>
+</xs:schema>`;
+
+    withTempDir((dir) => {
+      const file = path.join(dir, 'schema.xsd');
+      fs.writeFileSync(file, INLINE_SIMPLE_XSD);
+
+      const ir = parseXsd([file]);
+
+      // Top-level element: inline simpleType becomes a named simple type, not xs:string
+      const age = ir.elements['{urn:inline-simple}age'];
+      expect(age).toBeDefined();
+      expect(age.typeName).not.toBe('{http://www.w3.org/2001/XMLSchema}string');
+      const ageType = ir.simpleTypes[age.typeName];
+      expect(ageType).toBeDefined();
+      expect(ageType.baseType).toBe('{http://www.w3.org/2001/XMLSchema}integer');
+      expect(ageType.facets).toEqual([
+        { kind: 'minInclusive', value: 0 },
+        { kind: 'maxInclusive', value: 150 },
+      ]);
+
+      // Local element inside a complexType
+      const person = ir.complexTypes['{urn:inline-simple}Person'];
+      const nickname = person.fields.find((f) => f.qname === '{urn:inline-simple}nickname');
+      expect(nickname).toBeDefined();
+      const nicknameType = ir.simpleTypes[nickname!.typeName];
+      expect(nicknameType).toBeDefined();
+      expect(nicknameType.baseType).toBe('{http://www.w3.org/2001/XMLSchema}string');
+      expect(nicknameType.facets).toEqual([{ kind: 'maxLength', value: 20 }]);
+
+      // Attribute
+      const status = person.fields.find((f) => f.qname === '{}status');
+      expect(status).toBeDefined();
+      const statusType = ir.simpleTypes[status!.typeName];
+      expect(statusType).toBeDefined();
+      expect(statusType.facets).toEqual([
+        { kind: 'enumeration', value: 'active' },
+        { kind: 'enumeration', value: 'inactive' },
+      ]);
+
+      // The generated zod code uses the constraints
+      const generated = irToZod(ir);
+      expect(generated.schemas).toContain('z.number().int().min(0).max(150)');
+      expect(generated.schemas).toContain('z.string().max(20)');
+      expect(generated.schemas).toContain('z.enum(["active", "inactive"])');
+    });
+  });
+
   it('round-trips nested complex types without producing [object Object] (#8)', () => {
     const NESTED_XSD = `<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:nested-test" xmlns:t="urn:nested-test" elementFormDefault="qualified">
