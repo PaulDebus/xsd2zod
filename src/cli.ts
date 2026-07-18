@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildRuntimeMetadata, irToZod } from './irToZod.js';
@@ -330,6 +330,21 @@ export const main = (args: string[]): number => {
   }
 };
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// npm installs the bin as a symlink (node_modules/.bin/xsd2zod → dist/cli.js);
+// process.argv[1] keeps the symlink path while the ESM loader resolves
+// import.meta.url to the realpath — compare realpaths on both sides so the
+// CLI actually runs when invoked through the symlink (#80).
+export const isDirectInvocation = (argv1: string | undefined, moduleUrl: string): boolean => {
+  if (!argv1) {
+    return false;
+  }
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+};
+
+if (isDirectInvocation(process.argv[1], import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

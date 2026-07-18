@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { cmdValidate, loadMetadataFromMetaTs, main, parseArgs, parseValidateArgs, USAGE, VALIDATE_USAGE } from '../src/cli.js';
+import { cmdValidate, isDirectInvocation, loadMetadataFromMetaTs, main, parseArgs, parseValidateArgs, USAGE, VALIDATE_USAGE } from '../src/cli.js';
 import { buildRuntimeMetadata } from '../src/irToZod.js';
 import { parseXsd } from '../src/parseXsd.js';
 import { withTempDir } from './helpers.js';
@@ -168,6 +169,31 @@ describe('CLI e2e', () => {
       const r = runCli([xsdFile, '-o', dir]);
       expect(r.code).toBe(1);
       expect(r.stderr).toMatch(/^error: /);
+    });
+  });
+});
+
+describe('isDirectInvocation (#80)', () => {
+  it('resolves symlinks before comparing', () => {
+    withTempDir((dir) => {
+      const real = path.join(dir, 'cli.js');
+      fs.writeFileSync(real, '// bin\n');
+      const link = path.join(dir, 'xsd2zod');
+      fs.symlinkSync(real, link);
+      expect(isDirectInvocation(link, pathToFileURL(real).href)).toBe(true);
+      expect(isDirectInvocation(real, pathToFileURL(real).href)).toBe(true);
+    });
+  });
+
+  it('returns false for other scripts, missing argv1 and dangling paths', () => {
+    withTempDir((dir) => {
+      const real = path.join(dir, 'cli.js');
+      const other = path.join(dir, 'other.js');
+      fs.writeFileSync(real, '// bin\n');
+      fs.writeFileSync(other, '// other\n');
+      expect(isDirectInvocation(other, pathToFileURL(real).href)).toBe(false);
+      expect(isDirectInvocation(undefined, pathToFileURL(real).href)).toBe(false);
+      expect(isDirectInvocation(path.join(dir, 'gone.js'), pathToFileURL(real).href)).toBe(false);
     });
   });
 });
