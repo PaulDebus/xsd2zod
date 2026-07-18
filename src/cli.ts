@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildRuntimeMetadata, irToZod } from './irToZod.js';
 import { parseXsd } from './parseXsd.js';
@@ -62,17 +62,19 @@ export const parseArgs = (args: string[]): ParseArgsResult => {
     } else if (flag === 'out') {
       i++;
       out = args[i];
-      if (!out || isFlag(out) !== undefined) {
+      if (!out || out.startsWith('-')) {
         return { ok: false, error: '--out/-o requires a directory argument' };
       }
     } else if (flag === 'name') {
       i++;
       name = args[i];
-      if (!name || isFlag(name) !== undefined) {
+      if (!name || name.startsWith('-')) {
         return { ok: false, error: '--name/-n requires a string argument' };
       }
     } else if (flag === 'format') {
       format = true;
+    } else if (args[i].startsWith('-')) {
+      return { ok: false, error: `unknown option: ${args[i]}` };
     } else {
       files.push(args[i]);
     }
@@ -89,7 +91,15 @@ export const parseArgs = (args: string[]): ParseArgsResult => {
 
   if (!name) {
     const stem = files[0].replace(/\.xsd$/i, '').split(/[\\/]/).pop()!;
+    if (!stem) {
+      return { ok: false, error: 'cannot derive an output name from the input file; pass --name/-n' };
+    }
     name = stem;
+  }
+
+  // --name is joined into the output path — reject path traversal (#82).
+  if (name === '..' || name !== basename(name)) {
+    return { ok: false, error: '--name/-n must be a plain file name without path separators' };
   }
 
   return { ok: true, help: false, files, out, name, format };
@@ -141,21 +151,23 @@ export const parseValidateArgs = (args: string[]): ValidateArgsResult => {
     } else if (flag === 'xsd') {
       i++;
       xsdFile = args[i];
-      if (!xsdFile || isFlag(xsdFile) !== undefined) {
+      if (!xsdFile || xsdFile.startsWith('-')) {
         return { ok: false, error: '--xsd/-x requires a file argument' };
       }
     } else if (flag === 'metadata') {
       i++;
       metadataFile = args[i];
-      if (!metadataFile || isFlag(metadataFile) !== undefined) {
+      if (!metadataFile || metadataFile.startsWith('-')) {
         return { ok: false, error: '--metadata/-m requires a file argument' };
       }
     } else if (flag === 'root') {
       i++;
       root = args[i];
-      if (!root || isFlag(root) !== undefined) {
+      if (!root || root.startsWith('-')) {
         return { ok: false, error: '--root/-r requires a QName argument' };
       }
+    } else if (args[i].startsWith('-')) {
+      return { ok: false, error: `unknown option: ${args[i]}` };
     } else {
       xmlFile = args[i];
     }
@@ -271,44 +283,51 @@ export const main = (args: string[]): number => {
     return 0;
   }
 
-  const result = parseArgs(args);
+  try {
+    const result = parseArgs(args);
 
-  if (!result.ok) {
-    console.error(`error: ${result.error}`);
-    return 1;
-  }
+    if (!result.ok) {
+      console.error(`error: ${result.error}`);
+      return 1;
+    }
 
-  if (result.help) {
-    console.log(USAGE);
+    if (result.help) {
+      console.log(USAGE);
+      return 0;
+    }
+
+    const { files, out, name, format } = result;
+    const outDir = resolve(out);
+
+    if (!existsSync(outDir)) {
+      console.error(`error: output directory does not exist: ${outDir}`);
+      return 1;
+    }
+
+    const ir = parseXsd(files);
+    const { schemas, metadata } = irToZod(ir);
+
+    const zodFile = join(outDir, `${name}.zod.ts`);
+    const metaFile = join(outDir, `${name}.meta.ts`);
+
+    writeFileSync(zodFile, schemas, 'utf8');
+    writeFileSync(metaFile, metadata, 'utf8');
+
+    const generated = [zodFile, metaFile];
+
+    if (format) {
+      runPostGenerationFormatting(generated);
+    }
+
+    console.log(`Wrote ${zodFile}`);
+    console.log(`Wrote ${metaFile}`);
     return 0;
-  }
-
-  const { files, out, name, format } = result;
-  const outDir = resolve(out);
-
-  if (!existsSync(outDir)) {
-    console.error(`error: output directory does not exist: ${outDir}`);
+  } catch (e) {
+    // One error style for everything that can go wrong after arg parsing:
+    // missing input files, malformed XML, unwritable output paths (#82).
+    console.error(`error: ${(e as Error).message}`);
     return 1;
   }
-
-  const ir = parseXsd(files);
-  const { schemas, metadata } = irToZod(ir);
-
-  const zodFile = join(outDir, `${name}.zod.ts`);
-  const metaFile = join(outDir, `${name}.meta.ts`);
-
-  writeFileSync(zodFile, schemas, 'utf8');
-  writeFileSync(metaFile, metadata, 'utf8');
-
-  const generated = [zodFile, metaFile];
-
-  if (format) {
-    runPostGenerationFormatting(generated);
-  }
-
-  console.log(`Wrote ${zodFile}`);
-  console.log(`Wrote ${metaFile}`);
-  return 0;
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

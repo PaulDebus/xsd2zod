@@ -81,6 +81,27 @@ describe('parseArgs', () => {
     const r = parseArgs(['a.xsd', '--name', '--out']);
     expect(r).toEqual({ ok: false, error: '--name/-n requires a string argument' });
   });
+
+  it('rejects unknown options instead of treating them as files (#82)', () => {
+    expect(parseArgs(['a.xsd', '--fromat'])).toEqual({ ok: false, error: 'unknown option: --fromat' });
+    expect(parseArgs(['--out=dir', 'a.xsd'])).toEqual({ ok: false, error: 'unknown option: --out=dir' });
+  });
+
+  it('rejects flag values that look like options (#82)', () => {
+    expect(parseArgs(['a.xsd', '--out', '-x'])).toEqual({ ok: false, error: '--out/-o requires a directory argument' });
+  });
+
+  it('rejects --name with path separators (#82)', () => {
+    const err = '--name/-n must be a plain file name without path separators';
+    expect(parseArgs(['a.xsd', '-n', '../../somewhere/x'])).toEqual({ ok: false, error: err });
+    expect(parseArgs(['a.xsd', '--name', 'sub/dir'])).toEqual({ ok: false, error: err });
+    expect(parseArgs(['a.xsd', '--name', '..'])).toEqual({ ok: false, error: err });
+  });
+
+  it('rejects inputs that yield an empty output stem (#82)', () => {
+    const r = parseArgs(['.xsd']);
+    expect(r).toEqual({ ok: false, error: 'cannot derive an output name from the input file; pass --name/-n' });
+  });
 });
 
 describe('CLI e2e', () => {
@@ -128,6 +149,25 @@ describe('CLI e2e', () => {
 
       expect(r.code).toBe(0);
       expect(fs.existsSync(path.join(dir, 'my-stem.zod.ts'))).toBe(true);
+    });
+  });
+
+  it('reports missing input files in the CLI error style instead of a stack trace (#82)', () => {
+    withTempDir((dir) => {
+      const r = runCli([path.join(dir, 'missing.xsd'), '-o', dir]);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toMatch(/^error: /);
+      expect(r.stderr).not.toContain('at ');
+    });
+  });
+
+  it('reports malformed XML in the CLI error style (#82)', () => {
+    withTempDir((dir) => {
+      const xsdFile = path.join(dir, 'broken.xsd');
+      fs.writeFileSync(xsdFile, '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element');
+      const r = runCli([xsdFile, '-o', dir]);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toMatch(/^error: /);
     });
   });
 });
