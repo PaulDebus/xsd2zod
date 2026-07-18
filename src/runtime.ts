@@ -57,7 +57,7 @@ const escapeXml = (value: string): string =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
 
-const decodeXmlEntities = (xml: string): string =>
+export const decodeXmlEntities = (xml: string): string =>
   xml
     .replaceAll('&amp;', '&')
     .replaceAll('&lt;', '<')

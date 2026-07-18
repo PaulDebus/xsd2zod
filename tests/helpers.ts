@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
-import { createRootHelpers, irToZod, parseXsd } from '../src/index.js';
+import { createRootHelpers, decodeXmlEntities, irToZod, parseXsd } from '../src/index.js';
 import type { RuntimeMetadata, RuntimeRootMetadata } from '../src/types.js';
 
 export interface TestCase {
@@ -10,24 +10,13 @@ export interface TestCase {
   xmlFile: string;
 }
 
-function decodeEntities(text: string): string {
-  return text
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&apos;', "'")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
-}
-
 export function extractRootLocalName(xml: string): string {
   const match = xml.match(/<([^!?][^\s?>/]*)/);
   if (!match) throw new Error('Cannot find root element in XML');
   const name = match[1];
   const colonIdx = name.indexOf(':');
   const local = colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
-  return decodeEntities(local);
+  return decodeXmlEntities(local);
 }
 
 export function getRuntimeMetadata(xsdFiles: string[]): RuntimeMetadata {
