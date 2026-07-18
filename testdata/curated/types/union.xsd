@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:simpleType name="IntOrString">
+    <xs:union memberTypes="xs:int xs:string"/>
+  </xs:simpleType>
+  <xs:complexType name="UnionContainer">
+    <xs:sequence>
+      <xs:element name="value" type="t:IntOrString"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="unionContainer" type="t:UnionContainer"/>
+</xs:schema>

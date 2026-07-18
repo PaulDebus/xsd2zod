@@ -35,6 +35,8 @@ export type SimpleTypeDef = {
   name: QName;
   baseType: QName;
   facets?: Facet[];
+  itemType?: QName;
+  memberTypes?: QName[];
 };
 
 export type ComplexTypeDef = {
@@ -67,6 +69,8 @@ export type RuntimeTypeMetadata = {
   typeName: QName;
   fields: RuntimeFieldMetadata[];
   facets?: Facet[];
+  listItemType?: QName;
+  unionMemberTypes?: QName[];
 };
 
 export type RuntimeRootMetadata = {
