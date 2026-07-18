@@ -217,6 +217,113 @@ describe('xsd2zod v1 pipeline', () => {
     });
   });
 
+  it('resolves cross-file refs regardless of CLI argument order and types attribute refs from global declarations (#77)', () => {
+    const DECLARES_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:declares" xmlns:d="urn:declares" elementFormDefault="qualified">
+  <xs:element name="shared" type="xs:string"/>
+  <xs:attribute name="code" type="xs:int"/>
+  <xs:group name="G">
+    <xs:sequence>
+      <xs:element name="grouped" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:group>
+  <xs:attributeGroup name="AG">
+    <xs:attribute name="agAttr" type="xs:boolean"/>
+  </xs:attributeGroup>
+</xs:schema>`;
+
+    const USES_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:uses" xmlns:d="urn:declares" elementFormDefault="qualified">
+  <xs:complexType name="Holder">
+    <xs:sequence>
+      <xs:element ref="d:shared"/>
+      <xs:group ref="d:G"/>
+      <xs:element name="own" type="xs:int"/>
+    </xs:sequence>
+    <xs:attribute ref="d:code"/>
+    <xs:attributeGroup ref="d:AG"/>
+  </xs:complexType>
+  <xs:element name="holder" type="Holder"/>
+</xs:schema>`;
+
+    withTempDir((dir) => {
+      const declares = path.join(dir, 'declares.xsd');
+      const uses = path.join(dir, 'uses.xsd');
+      fs.writeFileSync(declares, DECLARES_XSD);
+      fs.writeFileSync(uses, USES_XSD);
+
+      // The two files have no import/include edge, so they used to be processed
+      // in argument order — refs from the first file were silently dropped.
+      for (const order of [[uses, declares], [declares, uses]]) {
+        const ir = parseXsd(order);
+        expect(ir.unresolvedRefs).toEqual([]);
+
+        const holder = ir.complexTypes['{urn:uses}Holder'];
+        expect(holder).toBeDefined();
+
+        const shared = holder.fields.find((f) => f.qname === '{urn:declares}shared');
+        expect(shared).toBeDefined();
+        expect(shared?.typeName).toBe('{http://www.w3.org/2001/XMLSchema}string');
+
+        const grouped = holder.fields.find((f) => f.qname.endsWith('}grouped'));
+        expect(grouped).toBeDefined();
+        expect(grouped?.typeName).toBe('{http://www.w3.org/2001/XMLSchema}boolean');
+
+        // Attribute refs resolve their type from the referenced global
+        // declaration instead of hardcoded xs:string.
+        const code = holder.fields.find((f) => f.qname === '{urn:declares}code');
+        expect(code).toBeDefined();
+        expect(code?.typeName).toBe('{http://www.w3.org/2001/XMLSchema}int');
+
+        const agAttr = holder.fields.find((f) => f.qname.endsWith('}agAttr'));
+        expect(agAttr).toBeDefined();
+        expect(agAttr?.kind).toBe('attribute');
+      }
+    });
+  });
+
+  it('reports unresolved references and unknown prefixes instead of silently dropping them (#77)', () => {
+    const BROKEN_XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:broken" xmlns:b="urn:broken" elementFormDefault="qualified">
+  <xs:complexType name="Holder">
+    <xs:sequence>
+      <xs:element ref="b:missing"/>
+      <xs:element name="own" type="xs:int"/>
+      <xs:group ref="b:missingGroup"/>
+    </xs:sequence>
+    <xs:attribute ref="b:missingAttr"/>
+    <xs:attributeGroup ref="b:missingAG"/>
+    <xs:attribute name="weird" type="zzz:thing"/>
+  </xs:complexType>
+  <xs:element name="holder" type="b:Holder"/>
+</xs:schema>`;
+
+    withTempDir((dir) => {
+      const file = path.join(dir, 'schema.xsd');
+      fs.writeFileSync(file, BROKEN_XSD);
+
+      const ir = parseXsd([file]);
+      const holder = ir.complexTypes['{urn:broken}Holder'];
+      // Unresolvable refs are skipped; the resolvable fields remain, and the
+      // unresolved attribute ref keeps its xs:string fallback field.
+      expect(holder.fields.map((f) => f.qname)).toEqual([
+        '{urn:broken}own',
+        '{urn:broken}missingAttr',
+        '{}weird',
+      ]);
+
+      expect(ir.unresolvedRefs).toEqual(
+        expect.arrayContaining([
+          'unresolved element ref "{urn:broken}missing"',
+          'unresolved group ref "{urn:broken}missingGroup"',
+          'unresolved attribute ref "{urn:broken}missingAttr"',
+          'unresolved attributeGroup ref "{urn:broken}missingAG"',
+          'unknown namespace prefix "zzz" in QName "zzz:thing"',
+        ])
+      );
+    });
+  });
+
   it('redefine-by-restriction replaces the original content model', () => {
     const BASE_XSD = `<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:redefine-test" xmlns:t="urn:redefine-test" elementFormDefault="qualified">
