@@ -57,6 +57,16 @@ const escapeXml = (value: string): string =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
 
+export const decodeXmlEntities = (xml: string): string =>
+  xml
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+
 const parsePrimitive = (raw: unknown, typeName: string): unknown => {
   const { namespace: ns, local } = splitClark(typeName);
   if (ns !== 'http://www.w3.org/2001/XMLSchema') {
@@ -317,7 +327,7 @@ export const parseXmlWithMetadata = <T>(
   root: RuntimeRootMetadata,
   types: Record<string, RuntimeTypeMetadata>
 ): T => {
-  const parsed = parser.parse(xml) as Record<string, unknown>;
+  const parsed = parser.parse(decodeXmlEntities(xml)) as Record<string, unknown>;
   const { root: rootNode, namespaceContext } = extractRoot(parsed, root.rootElement);
 
   return parseTypeFields(rootNode, root, namespaceContext, types) as T;

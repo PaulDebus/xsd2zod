@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
-import { createRootHelpers, irToZod, parseXsd } from '../src/index.js';
+import { createRootHelpers, decodeXmlEntities, irToZod, parseXsd } from '../src/index.js';
 import type { RuntimeMetadata, RuntimeRootMetadata } from '../src/types.js';
 
 export interface TestCase {
@@ -15,7 +15,8 @@ export function extractRootLocalName(xml: string): string {
   if (!match) throw new Error('Cannot find root element in XML');
   const name = match[1];
   const colonIdx = name.indexOf(':');
-  return colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
+  const local = colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
+  return decodeXmlEntities(local);
 }
 
 export function getRuntimeMetadata(xsdFiles: string[]): RuntimeMetadata {
