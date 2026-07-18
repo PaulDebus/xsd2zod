@@ -10,12 +10,24 @@ export interface TestCase {
   xmlFile: string;
 }
 
+function decodeEntities(text: string): string {
+  return text
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+}
+
 export function extractRootLocalName(xml: string): string {
   const match = xml.match(/<([^!?][^\s?>/]*)/);
   if (!match) throw new Error('Cannot find root element in XML');
   const name = match[1];
   const colonIdx = name.indexOf(':');
-  return colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
+  const local = colonIdx >= 0 ? name.slice(colonIdx + 1) : name;
+  return decodeEntities(local);
 }
 
 export function getRuntimeMetadata(xsdFiles: string[]): RuntimeMetadata {
