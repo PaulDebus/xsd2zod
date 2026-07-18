@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:simpleType name="AttrTokenList">
+    <xs:list itemType="xs:token"/>
+  </xs:simpleType>
+  <xs:complexType name="AttrListContainer">
+    <xs:attribute name="tags" type="t:AttrTokenList" use="required"/>
+  </xs:complexType>
+  <xs:element name="attrListContainer" type="t:AttrListContainer"/>
+</xs:schema>

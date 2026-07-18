@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:curated" xmlns:t="urn:curated" elementFormDefault="qualified">
+  <xs:simpleType name="InlineIntList">
+    <xs:list>
+      <xs:simpleType>
+        <xs:restriction base="xs:integer"/>
+      </xs:simpleType>
+    </xs:list>
+  </xs:simpleType>
+  <xs:complexType name="InlineListContainer">
+    <xs:sequence>
+      <xs:element name="numbers" type="t:InlineIntList"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="inlineListContainer" type="t:InlineListContainer"/>
+</xs:schema>

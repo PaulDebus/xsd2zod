@@ -594,7 +594,7 @@ export const parseXsd = (files: string[]): XsdIr => {
           } else {
             const inlineSimple = nodeChildren(listChild).find(([key]) => getNodeTagLocalName(key) === 'simpleType')?.[1];
             itemType = inlineSimple
-              ? resolveInlineSimpleType(inlineSimple, resolveNsMap, simpleTypes, qname)
+              ? resolveInlineSimpleType(inlineSimple, resolveNsMap, simpleTypes, `${qname}_itemType` as QName)
               : toClark(XSD_NS, 'string');
           }
           simpleTypes[qname] = { name: qname, baseType: itemType, itemType };
@@ -766,7 +766,7 @@ export const parseXsd = (files: string[]): XsdIr => {
           } else {
             const inlineSimple = nodeChildren(listChild).find(([key]) => getNodeTagLocalName(key) === 'simpleType')?.[1];
             itemType = inlineSimple
-              ? resolveInlineSimpleType(inlineSimple, override.nsMap, simpleTypes, override.qname)
+              ? resolveInlineSimpleType(inlineSimple, override.nsMap, simpleTypes, `${override.qname}_itemType` as QName)
               : toClark(XSD_NS, 'string');
           }
           simpleTypes[override.qname] = { name: override.qname, baseType: itemType, itemType };
