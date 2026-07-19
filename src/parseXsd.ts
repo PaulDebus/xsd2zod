@@ -1,8 +1,7 @@
 import path from 'node:path';
 import XMLParser from '@nodable/flexible-xml-parser';
-import { CompactBuilderFactory } from '@nodable/compact-builder';
-import type { BaseOutputBuilderFactory } from '@nodable/base-output-builder';
 import { readXmlFile } from './readXmlFile.js';
+import { createOutputBuilder } from './runtime.js';
 import type {
   Cardinality,
   ComplexTypeDef,
@@ -21,11 +20,7 @@ const parser = new XMLParser({
   attributes: { prefix: '@_' },
   // Decode entities but keep attribute/text lexicals verbatim: default number
   // coercion would corrupt schema values like fixed="1.0" or enum values (#68).
-  // Cast: see the declaration-bug note in runtime.ts.
-  OutputBuilder: new CompactBuilderFactory({
-    tags: { valueParsers: ['entity'] },
-    attributes: { valueParsers: ['entity'] },
-  }) as unknown as BaseOutputBuilderFactory
+  OutputBuilder: createOutputBuilder()
 });
 
 type AnyNode = Record<string, unknown>;
