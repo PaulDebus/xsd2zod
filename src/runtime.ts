@@ -1,21 +1,40 @@
 import XMLParser from '@nodable/flexible-xml-parser';
 import { CompactBuilderFactory } from '@nodable/compact-builder';
-import type { BaseOutputBuilderFactory } from '@nodable/base-output-builder';
+import { BaseOutputBuilderFactory, type BaseOutputBuilder } from '@nodable/base-output-builder';
 import type { z } from 'zod';
 import { xmlRegistry, type XmlFieldMeta, type XmlMeta } from './xmlMeta.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
 
-// Entity decoding is left to the parser; number/boolean coercion is disabled so
-// that readValue sees the raw lexicals and schema-driven coercion stays the
-// single coercion point for elements and attributes (#65).
-// The cast works around a declaration bug in @nodable/compact-builder@2.0.0:
-// its CompactBuilder.addElement(tag, matcher) is declared incompatible with
-// BaseOutputBuilder.addElement(tag).
-const outputBuilder = new CompactBuilderFactory({
-  tags: { valueParsers: ['entity'] },
-  attributes: { valueParsers: ['entity'] },
-}) as unknown as BaseOutputBuilderFactory;
+type GetInstanceArgs = Parameters<BaseOutputBuilderFactory['getInstance']>;
+type RegisterArgs = Parameters<BaseOutputBuilderFactory['registerValueParser']>;
+
+// Works around a declaration bug in @nodable/compact-builder@2.0.0 (#86):
+// CompactBuilder.addElement is declared as addElement(tag, matcher) while the
+// implementation — like BaseOutputBuilder.addElement — is addElement(tag),
+// which makes CompactBuilderFactory structurally incompatible with
+// BaseOutputBuilderFactory. The single upcast in getInstance follows the
+// declared extends chain and is runtime-safe. Remove this wrapper once
+// upstream ships fixed declarations.
+class EntityCompactBuilderFactory extends BaseOutputBuilderFactory {
+  // Entity decoding is left to the parser; number/boolean coercion is disabled
+  // so that readValue sees the raw lexicals and schema-driven coercion stays
+  // the single coercion point for elements and attributes (#65).
+  private readonly inner = new CompactBuilderFactory({
+    tags: { valueParsers: ['entity'] },
+    attributes: { valueParsers: ['entity'] },
+  });
+
+  override getInstance(...args: GetInstanceArgs): BaseOutputBuilder {
+    return this.inner.getInstance(...args) as BaseOutputBuilder;
+  }
+
+  override registerValueParser(...args: RegisterArgs): void {
+    this.inner.registerValueParser(...args);
+  }
+}
+
+export const createOutputBuilder = (): BaseOutputBuilderFactory => new EntityCompactBuilderFactory();
 
 const parser = new XMLParser({
   skip: { attributes: false },
@@ -23,7 +42,7 @@ const parser = new XMLParser({
   // Keep CDATA under its own key: merged text passes through the entity value
   // parser, which would corrupt literal entity text inside CDATA sections (#64).
   nameFor: { cdata: '#cdata' },
-  OutputBuilder: outputBuilder
+  OutputBuilder: createOutputBuilder()
 });
 
 const toArray = <T>(value: T | T[] | undefined): T[] => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
