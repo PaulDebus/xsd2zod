@@ -57,6 +57,60 @@ describe('validateXml (conformance tier)', () => {
       vi.resetModules();
     }
   });
+
+  it('retries loading libxml2-wasm after a failed import', async () => {
+    vi.resetModules();
+    let fail = true;
+    vi.doMock('libxml2-wasm', async () => {
+      if (fail) {
+        throw new Error("Cannot find package 'libxml2-wasm'");
+      }
+      return vi.importActual('libxml2-wasm');
+    });
+    try {
+      const { validateXml } = await import('../src/validate.js');
+      await expect(validateXml('<doc/>', XSD)).rejects.toThrow(/optional peer dependency 'libxml2-wasm'/);
+      fail = false;
+      await expect(validateXml('<doc><count>1</count></doc>', XSD)).resolves.toEqual({ valid: true });
+    } finally {
+      vi.doUnmock('libxml2-wasm');
+      vi.resetModules();
+    }
+  });
+
+  it('returns a fallback issue when libxml2 reports no error details', async () => {
+    vi.resetModules();
+    vi.doMock('libxml2-wasm', () => ({
+      XmlDocument: { fromString: () => ({ dispose: () => {} }) },
+      XsdValidator: {
+        fromDoc: () => ({
+          validate: () => {
+            throw Object.assign(new Error('validation failed'), { details: [] });
+          },
+          dispose: () => {},
+        }),
+      },
+    }));
+    try {
+      const { validateXml } = await import('../src/validate.js');
+      const result = await validateXml('<doc/>', XSD);
+      expect(result).toEqual({ valid: false, issues: [{ message: 'validation failed' }] });
+    } finally {
+      vi.doUnmock('libxml2-wasm');
+      vi.resetModules();
+    }
+  });
+
+  it('formats issues with line and column when present', async () => {
+    const { formatIssues } = await import('../src/validate.js');
+    expect(
+      formatIssues([
+        { message: 'plain' },
+        { message: 'lined', line: 2 },
+        { message: 'full', line: 2, column: 5 },
+      ])
+    ).toEqual(['plain', 'line 2: lined', 'line 2, column 5: full']);
+  });
 });
 
 afterEach(() => {

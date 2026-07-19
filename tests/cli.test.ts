@@ -347,7 +347,7 @@ describe('CLI validate e2e', () => {
       const r = await runCli(['validate', xmlFile, '-x', xsdFile, '--engine', 'libxml2']);
       expect(r.code).toBe(1);
       expect(r.stderr).toContain('Validation failed');
-      expect(r.stderr).toMatch(/line \d+:/);
+      expect(r.stderr).toMatch(/line \d+/);
     });
   });
 

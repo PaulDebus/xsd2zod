@@ -30,7 +30,10 @@ type Libxml2 = typeof import('libxml2-wasm');
 let libxml2Promise: Promise<Libxml2> | null = null;
 
 const loadLibxml2 = (): Promise<Libxml2> => {
-  libxml2Promise ??= (async () => {
+  if (libxml2Promise) {
+    return libxml2Promise;
+  }
+  const promise = (async () => {
     let libxml2: Libxml2;
     try {
       libxml2 = await import('libxml2-wasm');
@@ -50,12 +53,19 @@ const loadLibxml2 = (): Promise<Libxml2> => {
     }
     return libxml2;
   })();
-  return libxml2Promise;
+  // Don't cache a failed load (missing peer dep): the next call retries.
+  promise.catch(() => {
+    if (libxml2Promise === promise) {
+      libxml2Promise = null;
+    }
+  });
+  libxml2Promise = promise;
+  return promise;
 };
 
 const toIssues = (error: unknown): XmlValidationIssue[] => {
   const details = (error as { details?: unknown } | null)?.details;
-  if (Array.isArray(details)) {
+  if (Array.isArray(details) && details.length > 0) {
     return details.map((detail) => {
       const d = detail as { message?: unknown; file?: unknown; line?: unknown; col?: unknown };
       return {
@@ -68,6 +78,16 @@ const toIssues = (error: unknown): XmlValidationIssue[] => {
   }
   return [{ message: error instanceof Error ? error.message : String(error) }];
 };
+
+/** Format issues for display: `line L, column C: message` (parts omitted when absent). */
+export const formatIssues = (issues: XmlValidationIssue[]): string[] =>
+  issues.map((issue) => {
+    const where =
+      issue.line !== undefined
+        ? `line ${issue.line}${issue.column !== undefined ? `, column ${issue.column}` : ''}: `
+        : '';
+    return `${where}${issue.message}`;
+  });
 
 /**
  * Validate an XML document against an XSD schema with full conformance

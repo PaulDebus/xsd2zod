@@ -134,7 +134,7 @@ const TARGET_NS_RE = /\btargetNamespace\s*=\s*["']([^"']*)["']/;
 export async function validateXmlAgainstSchemas(xml: string, xsdFiles: string[]): Promise<void> {
   if (xsdFiles.length === 0) return;
 
-  const { validateXml } = await import('../src/validate.js');
+  const { formatIssues, validateXml } = await import('../src/validate.js');
 
   const { namespace: rootNamespace } = extractRootInfo(xml);
 
@@ -159,10 +159,7 @@ export async function validateXmlAgainstSchemas(xml: string, xsdFiles: string[])
       if (result.valid) {
         return;
       }
-      const issues = result.issues
-        .map((issue) => `${issue.line !== undefined ? `line ${issue.line}: ` : ''}${issue.message}`)
-        .join('; ');
-      errors.push(`${path.relative(process.cwd(), file)}: ${issues}`);
+      errors.push(`${path.relative(process.cwd(), file)}: ${formatIssues(result.issues).join('; ')}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(`${path.relative(process.cwd(), file)}: ${msg}`);

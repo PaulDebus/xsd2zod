@@ -257,15 +257,12 @@ export const cmdValidate = async (args: string[]): Promise<void> => {
   if (result.engine === 'libxml2') {
     // Conformance tier: full XSD semantics via libxml2-wasm (optional peer
     // dependency). --root is a zod-engine concept and is ignored here.
-    const { validateXml } = await import('./validate.js');
+    const { formatIssues, validateXml } = await import('./validate.js');
     const validation = await validateXml(readXmlFile(result.xmlFile), readXmlFile(result.xsdFile), {
       url: resolve(result.xsdFile),
     });
     if (!validation.valid) {
-      const detail = validation.issues
-        .map((issue) => `${issue.line !== undefined ? `line ${issue.line}: ` : ''}${issue.message}`)
-        .join('\n');
-      throw new CliError(`Validation failed:\n${detail}`);
+      throw new CliError(`Validation failed:\n${formatIssues(validation.issues).join('\n')}`);
     }
     console.log('Validation passed');
     return;
