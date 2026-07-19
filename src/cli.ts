@@ -340,10 +340,9 @@ export const main = async (args: string[]): Promise<number> => {
     const { files, out, name, format } = result;
     const outDir = resolve(out);
 
-    if (!existsSync(outDir)) {
-      console.error(`error: output directory does not exist: ${outDir}`);
-      return 1;
-    }
+    // Create the output directory if needed (#99); failures (e.g. a file in
+    // the way) surface via the catch below in the standard CLI error style.
+    mkdirSync(outDir, { recursive: true });
 
     const ir = parseXsd(files);
     warnUnresolvedRefs(ir);
