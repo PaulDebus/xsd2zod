@@ -1,8 +1,10 @@
 # xsd-to-zod
 
 [![npm version](https://img.shields.io/npm/v/xsd-to-zod.svg)](https://www.npmjs.com/package/xsd-to-zod)
+[![npm downloads](https://img.shields.io/npm/dm/xsd-to-zod.svg)](https://www.npmjs.com/package/xsd-to-zod)
 [![Tests](https://github.com/PaulDebus/xsd-to-zod/actions/workflows/test.yml/badge.svg)](https://github.com/PaulDebus/xsd-to-zod/actions/workflows/test.yml)
-[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
+[![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 > Turn XSD schemas into type-safe Zod parsers for XML.
 
@@ -241,7 +243,7 @@ npm test
 - `testdata/upstream/oasis-ubl-2.4/` — UBL Invoice + Order subset (OASIS RF on Limited Terms)
 - `testdata/upstream/w3c-xsdtests/` — git submodule of [w3c/xsdtests](https://github.com/w3c/xsdtests), pinned commit (W3C Document License)
 
-Full license attributions in [`testdata/THIRD_PARTY_NOTICES.md`](testdata/THIRD_PARTY_NOTICES.md).
+Full license attributions in [`testdata/THIRD_PARTY_NOTICES.md`](testdata/THIRD_PARTY_NOTICES.md). Current suite status and coverage notes live in [`docs/TEST_STATUS.md`](docs/TEST_STATUS.md).
 
 ## Limitations
 
@@ -260,4 +262,12 @@ Zod-tier specifics worth knowing:
 
 ### Known gaps (tracked as GitHub issues)
 
-- [#10] — cardinality/order/unexpected-element enforcement in generated schemas (re-evaluated after the registry rework)
+- [#10](https://github.com/PaulDebus/xsd-to-zod/issues/10) — cardinality/order/unexpected-element enforcement in generated schemas (re-evaluated after the registry rework)
+
+## Contributing
+
+Issues and PRs are welcome on [GitHub](https://github.com/PaulDebus/xsd-to-zod). Please branch from `main` and make sure `npm test` passes before submitting.
+
+## License
+
+[GPL-3.0-only](LICENSE) © Paul Debus
