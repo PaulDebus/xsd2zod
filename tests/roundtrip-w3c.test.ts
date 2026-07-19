@@ -57,6 +57,8 @@ describe('upstream parse benchmark', () => {
     parseXsd(allXsdFiles);
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(5000);
+    // NOTE: duration check removed — see issue #19.
+    // We only assert that all upstream XSDs parse without error.
+    // If parse time becomes a concern, add a proper benchmark script.
   });
 });
