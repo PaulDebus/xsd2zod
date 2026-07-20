@@ -19,8 +19,8 @@ type RegisterArgs = Parameters<BaseOutputBuilderFactory['registerValueParser']>;
 // upstream ships fixed declarations.
 class EntityCompactBuilderFactory extends BaseOutputBuilderFactory {
   // Entity decoding is left to the parser; number/boolean coercion is disabled
-  // so that readValue sees the raw lexicals and schema-driven coercion stays
-  // the single coercion point for elements and attributes (#65).
+  // so that every value arrives as a raw lexical and coerceLexical stays the
+  // single coercion point for elements and attributes (#65).
   private readonly inner = new CompactBuilderFactory({
     tags: { valueParsers: ['entity'] },
     attributes: { valueParsers: ['entity'] },
@@ -465,7 +465,9 @@ const readObject = (
 ): Record<string, unknown> => {
   const fields = findFieldsMeta(schema) ?? {};
   const shape = objectDefOf(schema)?.shape ?? {};
-  const result: Record<string, unknown> = {};
+  // Null prototype: an XSD element named __proto__ must become an own property,
+  // not a silent prototype mutation (#84).
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const [key, fieldMeta] of Object.entries(fields)) {
     const fieldSchema = shape[key];
     if (!fieldSchema) {
@@ -477,6 +479,16 @@ const readObject = (
     }
   }
   return result;
+};
+
+// Present-but-empty element: XSD applies default/fixed here (#66).
+const substituteEmpty = (
+  field: FieldAnalysis,
+  fieldMeta: XmlFieldMeta
+): { substituted: boolean; value?: unknown } => {
+  if (field.hasFixed) return { substituted: true, value: field.fixedValue };
+  if (fieldMeta.defaultValue !== undefined) return { substituted: true, value: fieldMeta.defaultValue };
+  return { substituted: false };
 };
 
 const readOccurrence = (
@@ -497,17 +509,16 @@ const readOccurrence = (
     }
     const text = textOf(childNode);
     if (text === undefined || text === '') {
-      // Present-but-empty element: XSD applies default/fixed here (#66).
-      if (field.hasFixed) return field.fixedValue;
-      if (fieldMeta.defaultValue !== undefined) return fieldMeta.defaultValue;
+      const empty = substituteEmpty(field, fieldMeta);
+      if (empty.substituted) return empty.value;
     }
     return coerceLexical(text, field.itemSchema);
   }
 
   // Scalar entry: the parser yields text-only elements as bare strings.
   if (entry === '') {
-    if (field.hasFixed) return field.fixedValue;
-    if (fieldMeta.defaultValue !== undefined) return fieldMeta.defaultValue;
+    const empty = substituteEmpty(field, fieldMeta);
+    if (empty.substituted) return empty.value;
   }
   if (hasObjectShape(field.itemSchema)) {
     return readObject(field.itemSchema, { '#text': entry }, namespaceContext);

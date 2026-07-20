@@ -315,9 +315,6 @@ const choiceRefines = (type: ComplexTypeDef): string[] => {
 const fieldsMetaFor = (type: ComplexTypeDef, ir: XsdIr): string => {
   const entries = type.fields.map((field) => {
     const parts = [`kind: ${JSON.stringify(field.kind)}`, `qname: ${JSON.stringify(field.qname)}`];
-    if (field.choiceGroup) {
-      parts.push(`choiceGroup: ${JSON.stringify(field.choiceGroup)}`);
-    }
     if (field.kind === 'element' && field.defaultValue !== undefined && field.fixedValue === undefined) {
       parts.push(`defaultValue: ${typedLiteral(resolvePrimitiveKind(field.typeName, ir), field.defaultValue)}`);
     }

@@ -9,7 +9,6 @@ import type { QName } from './types.js';
 export type XmlFieldMeta = {
   kind: 'element' | 'attribute' | 'text';
   qname: QName;
-  choiceGroup?: string;
   /**
    * Element default (coerced JS value, elements only). XSD applies an element
    * default to present-but-empty elements — not to absent ones — so it cannot
