@@ -2,6 +2,7 @@ import XMLParser from '@nodable/flexible-xml-parser';
 import { CompactBuilderFactory } from '@nodable/compact-builder';
 import { BaseOutputBuilderFactory, type BaseOutputBuilder } from '@nodable/base-output-builder';
 import type { z } from 'zod';
+import { splitClark, splitQName } from './qname.js';
 import { xmlRegistry, type XmlFieldMeta, type XmlMeta } from './xmlMeta.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
@@ -58,22 +59,6 @@ const textOf = (node: Record<string, unknown>): unknown => {
   }
   const cdataText = Array.isArray(cdata) ? cdata.join('') : String(cdata);
   return `${text === undefined ? '' : String(text)}${cdataText}`;
-};
-
-const splitClark = (qname: string): { namespace: string; local: string } => {
-  if (!qname.startsWith('{')) {
-    return { namespace: '', local: qname };
-  }
-  const boundary = qname.indexOf('}');
-  if (boundary === -1) {
-    return { namespace: '', local: qname };
-  }
-  return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
-};
-
-const splitXmlName = (name: string): { prefix: string; local: string } => {
-  const idx = name.indexOf(':');
-  return idx === -1 ? { prefix: '', local: name } : { prefix: name.slice(0, idx), local: name.slice(idx + 1) };
 };
 
 const collectNamespaceDeclarations = (node: Record<string, unknown>): Record<string, string> => {
@@ -395,7 +380,7 @@ const findAttributeValue = (
     if (!key.startsWith('@_')) {
       continue;
     }
-    const { prefix, local } = splitXmlName(key.slice(2));
+    const { prefix, local } = splitQName(key.slice(2));
     const namespace = prefix ? (namespaceContext[prefix] ?? '') : '';
     if (local === expected.local && namespace === expected.namespace) {
       return value;
@@ -415,7 +400,7 @@ const findElementValues = (
     if (key.startsWith('@_') || key === '#text' || key === '#cdata') {
       continue;
     }
-    const { prefix, local } = splitXmlName(key);
+    const { prefix, local } = splitQName(key);
     if (local !== expected.local) {
       continue;
     }
@@ -450,7 +435,7 @@ const extractRoot = (
   const entry = Object.entries(parsed).find(([key, value]) => {
     const node = value && typeof value === 'object' ? (Array.isArray(value) ? value[0] : value) as Record<string, unknown> : {};
     const namespaceContext = withNamespaceContext({}, node);
-    const { prefix, local } = splitXmlName(key);
+    const { prefix, local } = splitQName(key);
     const namespace = prefix ? (namespaceContext[prefix] ?? '') : (namespaceContext[''] ?? '');
     return local === expected.local && namespace === expected.namespace;
   });

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import XMLParser from '@nodable/flexible-xml-parser';
+import { splitQName, syntheticChildName, toClark } from './qname.js';
 import { readXmlFile } from './readXmlFile.js';
 import { createOutputBuilder } from './runtime.js';
 import type {
@@ -35,24 +36,6 @@ const asArray = <T>(value: T | T[] | undefined): T[] => {
     return [];
   }
   return Array.isArray(value) ? value : [value];
-};
-
-const splitQName = (name: string): { prefix: string; local: string } => {
-  const idx = name.indexOf(':');
-  return idx === -1 ? { prefix: '', local: name } : { prefix: name.slice(0, idx), local: name.slice(idx + 1) };
-};
-
-const toClark = (nsUri: string | undefined, local: string): QName => `{${nsUri ?? ''}}${local}`;
-
-const fromClark = (qname: QName): { namespace: string; local: string } => {
-  if (!qname.startsWith('{')) {
-    return { namespace: '', local: qname };
-  }
-  const boundary = qname.indexOf('}');
-  if (boundary === -1) {
-    return { namespace: '', local: qname };
-  }
-  return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
 };
 
 const NUMBER_FACETS = new Set(['length', 'minLength', 'maxLength', 'minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive', 'totalDigits', 'fractionDigits']);
@@ -114,7 +97,7 @@ const parseSimpleTypeDef = (
     } else {
       const inlineSimple = nodeChildren(listChild).find(([key]) => getNodeTagLocalName(key) === 'simpleType')?.[1];
       itemType = inlineSimple
-        ? resolveInlineSimpleType(inlineSimple, nsMap, simpleTypes, `${qname}_itemType` as QName, diagnostics)
+        ? resolveInlineSimpleType(inlineSimple, nsMap, simpleTypes, syntheticChildName(qname, '_itemType'), diagnostics)
         : toClark(XSD_NS, 'string');
     }
     return { name: qname, baseType: itemType, itemType, description };
@@ -129,7 +112,7 @@ const parseSimpleTypeDef = (
     } else {
       memberTypes = nodeChildren(unionChild)
         .filter(([key]) => getNodeTagLocalName(key) === 'simpleType')
-        .map(([, stNode], idx) => resolveInlineSimpleType(stNode, nsMap, simpleTypes, `${qname}_member${idx}` as QName, diagnostics));
+        .map(([, stNode], idx) => resolveInlineSimpleType(stNode, nsMap, simpleTypes, syntheticChildName(qname, `_member${idx}`), diagnostics));
     }
     const baseType = memberTypes[0] ?? toClark(XSD_NS, 'string');
     return { name: qname, baseType, memberTypes, description };
@@ -1007,7 +990,7 @@ export const parseXsd = (files: string[]): XsdIr => {
   }
 
   const mergedComplexTypes: Record<string, ComplexTypeDef> = {};
-  const resolveMergedFields = (typeName: QName, stack: Set<QName>): IrField[] => {
+  const resolveMergedFields = (typeName: string, stack: Set<string>): IrField[] => {
     const type = complexTypes[typeName];
     if (!type) {
       return [];
@@ -1028,7 +1011,7 @@ export const parseXsd = (files: string[]): XsdIr => {
   for (const [name, type] of Object.entries(complexTypes)) {
     mergedComplexTypes[name] = {
       ...type,
-      fields: resolveMergedFields(name as QName, new Set())
+      fields: resolveMergedFields(name, new Set())
     };
   }
 
@@ -1042,4 +1025,4 @@ export const parseXsd = (files: string[]): XsdIr => {
   };
 };
 
-export const clarkToLocal = (qname: QName): string => fromClark(qname).local;
+export { clarkToLocal } from './qname.js';

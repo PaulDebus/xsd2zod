@@ -1,4 +1,4 @@
-import { clarkToLocal } from './parseXsd.js';
+import { clarkToLocal, trySplitClark } from './qname.js';
 import { XSD_INTEGER_TYPE_NAMES } from './xsdBuiltins.js';
 import type {
   ComplexTypeDef,
@@ -13,15 +13,10 @@ const XSD_NS = 'http://www.w3.org/2001/XMLSchema';
 
 const NUMBER_PRIMITIVES = new Set([...XSD_INTEGER_TYPE_NAMES, 'decimal', 'float', 'double']);
 
-const splitClarkLocal = (typeName: QName): { ns: string; local: string } | undefined => {
-  const match = typeName.match(/^\{(.*)}(.*)$/);
-  return match ? { ns: match[1], local: match[2] } : undefined;
-};
-
 // Resolve a (possibly user-defined) simple type to its builtin base kind, so
 // fixed/default values are coerced to the JS type the runtime produces (#87).
 const resolvePrimitiveKind = (typeName: QName, ir: XsdIr, seen?: Set<string>): 'number' | 'boolean' | 'string' => {
-  const parts = splitClarkLocal(typeName);
+  const parts = trySplitClark(typeName);
   if (!parts) {
     return 'string';
   }
@@ -41,7 +36,7 @@ const resolvePrimitiveKind = (typeName: QName, ir: XsdIr, seen?: Set<string>): '
 };
 
 const primitiveToZod = (typeName: QName, definedTypes: Set<string>): string => {
-  const parts = splitClarkLocal(typeName);
+  const parts = trySplitClark(typeName);
   if (!parts) {
     return 'z.unknown()';
   }
