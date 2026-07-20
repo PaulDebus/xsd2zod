@@ -9,8 +9,11 @@ export { xmlRegistry } from './xmlMeta.js';
 export type { XmlFieldMeta, XmlMeta } from './xmlMeta.js';
 export { countFractionDigits, countTotalDigits, xsdFractionDigits, xsdTotalDigits } from './xsdChecks.js';
 export type {
+  Cardinality,
   ComplexTypeDef,
   ElementDef,
+  Facet,
+  FieldKind,
   IrField,
   QName,
   SimpleTypeDef,
