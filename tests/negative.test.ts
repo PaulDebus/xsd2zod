@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { irToZod, parseXsd, safeParseXml } from '../src/index.js';
-import { findRootSchema, importGeneratedSchemas, readXmlFile } from './helpers.js';
+import { safeParseXml } from '../src/index.js';
+import { findRootSchema, generateAndImport, readXmlFile } from './helpers.js';
 
 const NEGATIVE_DIR = path.resolve('testdata/curated/negative');
 
@@ -27,17 +27,16 @@ const EXPECTED: Record<string, NegativeExpectation> = {
   'invalid-max-occurs': { error: '<=4 items', zod: true },
   // Bounded cardinality: minOccurs=2 but XML has 1 item.
   'invalid-min-occurs': { error: '>=2 items', zod: true },
-  // A missing required element fails the final schema validation.
+  // A missing required element now fails the final schema validation.
   'invalid-missing-required-element': { error: 'Invalid input: expected string', zod: true },
   // Root in a foreign namespace is rejected structurally.
   'invalid-namespace': { error: "Root element '{urn:negative}strict' not found in XML payload", zod: false },
   // xsi:nil="true" on the root: content of a nilled element is dropped.
   'invalid-nil-with-content': { data: null },
-  // Unknown elements are silently tolerated (xs:any wildcards not yet supported).
+  // Unknown elements are ignored.
   'invalid-unexpected-element': { data: { required: 'req', repeated: [1, 2], '@must': 'abc' } },
-  // Element order is enforced as a subsequence of the declared field order:
-  // 'first' appears after 'second' in the XML, violating [first, second, third].
-  'invalid-wrong-element-order': { error: "Element 'first' out of order", zod: false },
+  // Order is not enforced: fields are matched by name.
+  'invalid-wrong-element-order': { data: { first: 'wrong order', second: 42, third: true } },
 };
 
 function discoverNegativeCases(): NegativeCase[] {
@@ -65,7 +64,7 @@ describe('negative — invalid XML handling', () => {
 
   let mod: Record<string, unknown>;
   beforeAll(async () => {
-    mod = await importGeneratedSchemas(irToZod(parseXsd([xsdPath])).schemas);
+    mod = await generateAndImport([xsdPath]);
   });
 
   for (const c of negativeCases) {

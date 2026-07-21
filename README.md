@@ -96,7 +96,7 @@ const xml = serializeXml(orderSchema, data);
 - **Namespaces**: Clark notation `{ns}local` throughout, qualified/unqualified form defaults, `xs:include`/`xs:import` across files
 - **Chameleon includes**: inherited target namespace for includee schemas without a `targetNamespace`
 - **Encoding detection**: BOM and declaration sniffing (UTF-16LE/BE, CP1252, UTF-8) via `iconv-lite`
-- **Cardinality**: `minOccurs`/`maxOccurs` → `.optional()` / `z.array()`; defaults/fixed with XSD-correct semantics (attribute defaults on absence, element defaults on present-but-empty)
+- **Cardinality**: `minOccurs`/`maxOccurs` → `.optional()` / `z.array()` with `.min()`/`.max()` bounds; defaults/fixed with XSD-correct semantics (attribute defaults on absence, element defaults on present-but-empty)
 - **Nillable**: `xsi:nil="true"` → `.nullable()` in schema, round-trips through `serializeXml`
 - **Cyclic references**: every emitted complex-type schema is wrapped in `z.lazy(() => ...)` so forward references and true cycles (e.g. `Person.manager: Person`) load without `ReferenceError`
 - **Two validation tiers**: the zod tier (typed parse, user-friendly `ZodError`s) and an optional libxml2 conformance tier (full XSD semantics, line-numbered errors)
@@ -213,7 +213,7 @@ Behavioral changes to know about:
 - **Defaults**: attribute-with-default now always appears in parsed output (XSD-correct) and its `z.infer` type is non-optional. Element defaults apply to *present-but-empty* elements, not absent ones.
 - **Roots of empty complex types** parse to `{}` (previously a scalar/`{_text}` object).
 - **INF/-INF/NaN** lexicals are rejected by the zod tier (Zod cannot express non-finite numbers); the conformance tier accepts them.
-- The zod tier is deliberately lenient about cardinality bounds beyond `0/1/unbounded`, element order, and unexpected elements — the conformance tier is the strict one.
+- The zod tier is deliberately lenient about element order and unexpected elements — the conformance tier is the strict one.
 
 ## Why trust this?
 
@@ -256,13 +256,13 @@ Not supported by the generator (the conformance tier validates them anyway):
 
 Zod-tier specifics worth knowing:
 
-- Cardinality beyond `0/1/unbounded`, element order, and unexpected elements are not enforced (conformance tier covers them)
+- Element order and unexpected elements are not enforced (conformance tier covers them)
 - Facets Zod cannot express are not promised (conformance tier covers them)
 - `xs:float`/`xs:double` specials `INF`/`-INF`/`NaN` are rejected
 
 ### Known gaps (tracked as GitHub issues)
 
-- [#10](https://github.com/PaulDebus/xsd-to-zod/issues/10) — cardinality/order/unexpected-element enforcement in generated schemas (re-evaluated after the registry rework)
+- [#10](https://github.com/PaulDebus/xsd-to-zod/issues/10) — element order / unexpected-element enforcement in generated schemas (cardinality bounds are enforced; the rest belongs to the conformance tier)
 
 ## Contributing
 

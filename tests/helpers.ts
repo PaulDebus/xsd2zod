@@ -6,6 +6,15 @@ import { expect } from 'vitest';
 import { z } from 'zod';
 import { irToZod, parseXsd, parseXml, readXmlFile, safeParseXml, serializeXml, xmlRegistry } from '../src/index.js';
 import { decodeTagNameCharRefs } from '../src/runtime.js';
+import type { SimpleTypeDef } from '../src/types.js';
+
+// Narrow a SimpleTypeDef to its restriction variant in tests (#84).
+export const asRestriction = (type: SimpleTypeDef): Extract<SimpleTypeDef, { kind: 'restriction' }> => {
+  if (type.kind !== 'restriction') {
+    throw new Error(`expected restriction simple type, got ${type.kind}`);
+  }
+  return type;
+};
 
 export interface TestCase {
   name: string;
@@ -71,6 +80,10 @@ export async function importGeneratedSchemas(schemasCode: string): Promise<Recor
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// parseXsd → irToZod → importGeneratedSchemas in one call (#84).
+export const generateAndImport = (xsdFiles: string[]): Promise<Record<string, unknown>> =>
+  importGeneratedSchemas(irToZod(parseXsd(xsdFiles)).schemas);
 
 const stripProlog = (xml: string): string =>
   xml

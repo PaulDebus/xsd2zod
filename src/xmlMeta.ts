@@ -9,7 +9,6 @@ import type { QName } from './types.js';
 export type XmlFieldMeta = {
   kind: 'element' | 'attribute' | 'text';
   qname: QName;
-  choiceGroup?: string;
   /**
    * Element default (coerced JS value, elements only). XSD applies an element
    * default to present-but-empty elements — not to absent ones — so it cannot
@@ -31,8 +30,6 @@ export type XmlFieldMeta = {
 export type XmlMeta = {
   qname?: QName;
   root?: QName;
-  /** Whether this type has xs:choice groups choice groups (#10). */
-  hasChoice?: boolean;
   fields?: Record<string, XmlFieldMeta>;
 };
 

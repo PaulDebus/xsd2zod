@@ -1,5 +1,7 @@
 import path from 'node:path';
 import XMLParser from '@nodable/flexible-xml-parser';
+import { Xsd2ZodError } from './errors.js';
+import { splitQName, syntheticChildName, toClark } from './qname.js';
 import { readXmlFile } from './readXmlFile.js';
 import { createOutputBuilder } from './runtime.js';
 import type {
@@ -35,24 +37,6 @@ const asArray = <T>(value: T | T[] | undefined): T[] => {
     return [];
   }
   return Array.isArray(value) ? value : [value];
-};
-
-const splitQName = (name: string): { prefix: string; local: string } => {
-  const idx = name.indexOf(':');
-  return idx === -1 ? { prefix: '', local: name } : { prefix: name.slice(0, idx), local: name.slice(idx + 1) };
-};
-
-const toClark = (nsUri: string | undefined, local: string): QName => `{${nsUri ?? ''}}${local}`;
-
-const fromClark = (qname: QName): { namespace: string; local: string } => {
-  if (!qname.startsWith('{')) {
-    return { namespace: '', local: qname };
-  }
-  const boundary = qname.indexOf('}');
-  if (boundary === -1) {
-    return { namespace: '', local: qname };
-  }
-  return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
 };
 
 const NUMBER_FACETS = new Set(['length', 'minLength', 'maxLength', 'minInclusive', 'maxInclusive', 'minExclusive', 'maxExclusive', 'totalDigits', 'fractionDigits']);
@@ -114,10 +98,10 @@ const parseSimpleTypeDef = (
     } else {
       const inlineSimple = nodeChildren(listChild).find(([key]) => getNodeTagLocalName(key) === 'simpleType')?.[1];
       itemType = inlineSimple
-        ? resolveInlineSimpleType(inlineSimple, nsMap, simpleTypes, `${qname}_itemType` as QName, diagnostics)
+        ? resolveInlineSimpleType(inlineSimple, nsMap, simpleTypes, syntheticChildName(qname, '_itemType'), diagnostics)
         : toClark(XSD_NS, 'string');
     }
-    return { name: qname, baseType: itemType, itemType, description };
+    return { name: qname, kind: 'list', itemType, description };
   }
 
   const unionChild = nodeChildren(node).find(([key]) => getNodeTagLocalName(key) === 'union')?.[1];
@@ -129,16 +113,15 @@ const parseSimpleTypeDef = (
     } else {
       memberTypes = nodeChildren(unionChild)
         .filter(([key]) => getNodeTagLocalName(key) === 'simpleType')
-        .map(([, stNode], idx) => resolveInlineSimpleType(stNode, nsMap, simpleTypes, `${qname}_member${idx}` as QName, diagnostics));
+        .map(([, stNode], idx) => resolveInlineSimpleType(stNode, nsMap, simpleTypes, syntheticChildName(qname, `_member${idx}`), diagnostics));
     }
-    const baseType = memberTypes[0] ?? toClark(XSD_NS, 'string');
-    return { name: qname, baseType, memberTypes, description };
+    return { name: qname, kind: 'union', memberTypes, description };
   }
 
   const restriction = nodeChildren(node).find(([key]) => getNodeTagLocalName(key) === 'restriction')?.[1];
   const baseType = resolveTypeQName(restriction?.['@_base'] ? String(restriction['@_base']) : undefined, nsMap, diagnostics);
   const facets = restriction ? parseFacets(restriction) : [];
-  return { name: qname, baseType, facets: facets.length > 0 ? facets : undefined, description };
+  return { name: qname, kind: 'restriction', baseType, facets: facets.length > 0 ? facets : undefined, description };
 };
 
 const resolveInlineSimpleType = (
@@ -180,7 +163,7 @@ const OCCURS_LEXICAL = /^\d+$/;
 const parseOccursValue = (raw: unknown, attr: 'minOccurs' | 'maxOccurs'): number => {
   const text = String(raw).trim();
   if (!OCCURS_LEXICAL.test(text)) {
-    throw new Error(`Invalid ${attr} value ${JSON.stringify(text)}: expected a non-negative integer`);
+    throw new Xsd2ZodError('invalid-occurs', `Invalid ${attr} value ${JSON.stringify(text)}: expected a non-negative integer`);
   }
   return Number(text);
 };
@@ -252,7 +235,7 @@ const readSchema = (
   const parsed = parser.parse(xml) as Record<string, AnyNode>;
   const schemaEntry = Object.entries(parsed).find(([key]) => getNodeTagLocalName(key) === 'schema');
   if (!schemaEntry) {
-    throw new Error(`No schema root found in ${filePath}`);
+    throw new Xsd2ZodError('no-schema-root', `No schema root found in ${filePath}`, { file: filePath });
   }
   const schemaNode = schemaEntry[1];
   const nsMap = collectNamespaceMap(schemaNode);
@@ -752,8 +735,8 @@ export const parseXsd = (files: string[]): XsdIr => {
     return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
   });
 
-  // Collect redefine overrides keyed by the included schema file path
-  const redefineOverrides: Map<string, RedefineOverride[]> = new Map();
+  // Redefine overrides, in the order the xs:redefine elements were seen.
+  const redefineOverrides: RedefineOverride[] = [];
 
   // Declaration collection (pass 1) is separated from field collection (passes 2-3)
   // so element/group/attributeGroup/attribute references always resolve against the
@@ -858,9 +841,7 @@ export const parseXsd = (files: string[]): XsdIr => {
             const rqname = toClark(effectiveNs, rname);
             const schemaLocation = child['@_schemaLocation'] ? String(child['@_schemaLocation']) : '';
             if (schemaLocation) {
-              const resolved = path.resolve(path.dirname(entry.file), schemaLocation);
-              if (!redefineOverrides.has(resolved)) redefineOverrides.set(resolved, []);
-              redefineOverrides.get(resolved)!.push({
+              redefineOverrides.push({
                 kind: rlocal,
                 qname: rqname,
                 node: rchild,
@@ -879,13 +860,11 @@ export const parseXsd = (files: string[]): XsdIr => {
 
   // Group/attributeGroup redefines must land before any field collection:
   // references to them are inlined into consumers at collection time (#78).
-  for (const [, overrides] of redefineOverrides) {
-    for (const override of overrides) {
-      if (override.kind === 'group') {
-        groups[override.qname] = { ownerNs: override.targetNs, formDefaults: override.formDefaults, nsMap: override.nsMap, node: override.node };
-      } else if (override.kind === 'attributeGroup') {
-        attributeGroups[override.qname] = { ownerNs: override.targetNs, formDefaults: override.formDefaults, nsMap: override.nsMap, node: override.node };
-      }
+  for (const override of redefineOverrides) {
+    if (override.kind === 'group') {
+      groups[override.qname] = { ownerNs: override.targetNs, formDefaults: override.formDefaults, nsMap: override.nsMap, node: override.node };
+    } else if (override.kind === 'attributeGroup') {
+      attributeGroups[override.qname] = { ownerNs: override.targetNs, formDefaults: override.formDefaults, nsMap: override.nsMap, node: override.node };
     }
   }
 
@@ -946,47 +925,45 @@ export const parseXsd = (files: string[]): XsdIr => {
   }
 
   // Apply redefine overrides — replace or augment types in the included schemas
-  for (const [, overrides] of redefineOverrides) {
-    for (const override of overrides) {
-      if (override.kind === 'complexType') {
-        const fields: IrField[] = [];
-        collectFields(override.targetNs, override.node, fields, fieldContext(override.nsMap, override.formDefaults, override.targetNs));
-        const complexContent = nodeChildren(override.node)
-          .find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
-        const derivationEntry = complexContent
-          ? nodeChildren(complexContent).find(([key]) => {
-              const local = getNodeTagLocalName(key);
-              return local === 'extension' || local === 'restriction';
-            })
-          : undefined;
-        const derivationKind = derivationEntry ? getNodeTagLocalName(derivationEntry[0]) : undefined;
-        const derivationNode = derivationEntry?.[1];
-        const baseType = derivationNode?.['@_base'] ? resolveTypeQName(String(derivationNode['@_base']), override.nsMap, unresolvedRefs) : undefined;
-        const description = extractDocumentation(override.node);
-        if (baseType === override.qname && derivationKind === 'extension') {
-          const original = complexTypes[override.qname];
-          if (original) {
-            complexTypes[override.qname] = { name: override.qname, fields: [...original.fields, ...fields], baseType: original.baseType, description: description ?? original.description };
-          } else {
-            complexTypes[override.qname] = { name: override.qname, fields, baseType: undefined, description };
-          }
-        } else if (baseType === override.qname && derivationKind === 'restriction') {
-          complexTypes[override.qname] = { name: override.qname, fields, baseType: undefined, description };
+  for (const override of redefineOverrides) {
+    if (override.kind === 'complexType') {
+      const fields: IrField[] = [];
+      collectFields(override.targetNs, override.node, fields, fieldContext(override.nsMap, override.formDefaults, override.targetNs));
+      const complexContent = nodeChildren(override.node)
+        .find(([key]) => getNodeTagLocalName(key) === 'complexContent')?.[1];
+      const derivationEntry = complexContent
+        ? nodeChildren(complexContent).find(([key]) => {
+            const local = getNodeTagLocalName(key);
+            return local === 'extension' || local === 'restriction';
+          })
+        : undefined;
+      const derivationKind = derivationEntry ? getNodeTagLocalName(derivationEntry[0]) : undefined;
+      const derivationNode = derivationEntry?.[1];
+      const baseType = derivationNode?.['@_base'] ? resolveTypeQName(String(derivationNode['@_base']), override.nsMap, unresolvedRefs) : undefined;
+      const description = extractDocumentation(override.node);
+      if (baseType === override.qname && derivationKind === 'extension') {
+        const original = complexTypes[override.qname];
+        if (original) {
+          complexTypes[override.qname] = { name: override.qname, fields: [...original.fields, ...fields], baseType: original.baseType, description: description ?? original.description };
         } else {
-          complexTypes[override.qname] = { name: override.qname, fields, baseType, description };
+          complexTypes[override.qname] = { name: override.qname, fields, baseType: undefined, description };
         }
-      } else if (override.kind === 'simpleType') {
-        // Drop synthetic inline item/member types created for the previous definition
-        // so swapping list ↔ union (or changing item/member shape) does not leave orphans.
-        const orphanPrefix = `${override.qname}_`;
-        for (const existingName of Object.keys(simpleTypes)) {
-          if (existingName.startsWith(orphanPrefix)) {
-            delete simpleTypes[existingName];
-          }
-        }
-
-        simpleTypes[override.qname] = parseSimpleTypeDef(override.qname, override.node, override.nsMap, simpleTypes, unresolvedRefs);
+      } else if (baseType === override.qname && derivationKind === 'restriction') {
+        complexTypes[override.qname] = { name: override.qname, fields, baseType: undefined, description };
+      } else {
+        complexTypes[override.qname] = { name: override.qname, fields, baseType, description };
       }
+    } else if (override.kind === 'simpleType') {
+      // Drop synthetic inline item/member types created for the previous definition
+      // so swapping list ↔ union (or changing item/member shape) does not leave orphans.
+      const orphanPrefix = `${override.qname}_`;
+      for (const existingName of Object.keys(simpleTypes)) {
+        if (existingName.startsWith(orphanPrefix)) {
+          delete simpleTypes[existingName];
+        }
+      }
+
+      simpleTypes[override.qname] = parseSimpleTypeDef(override.qname, override.node, override.nsMap, simpleTypes, unresolvedRefs);
     }
   }
 
@@ -1007,7 +984,7 @@ export const parseXsd = (files: string[]): XsdIr => {
   }
 
   const mergedComplexTypes: Record<string, ComplexTypeDef> = {};
-  const resolveMergedFields = (typeName: QName, stack: Set<QName>): IrField[] => {
+  const resolveMergedFields = (typeName: string, stack: Set<string>): IrField[] => {
     const type = complexTypes[typeName];
     if (!type) {
       return [];
@@ -1028,7 +1005,7 @@ export const parseXsd = (files: string[]): XsdIr => {
   for (const [name, type] of Object.entries(complexTypes)) {
     mergedComplexTypes[name] = {
       ...type,
-      fields: resolveMergedFields(name as QName, new Set())
+      fields: resolveMergedFields(name, new Set())
     };
   }
 
@@ -1042,4 +1019,4 @@ export const parseXsd = (files: string[]): XsdIr => {
   };
 };
 
-export const clarkToLocal = (qname: QName): string => fromClark(qname).local;
+export { clarkToLocal } from './qname.js';

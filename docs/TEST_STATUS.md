@@ -12,6 +12,8 @@ Round-trip tests additionally:
 
 Negative fixtures (`testdata/curated/negative/`) pin the exact lenient parse result, so changes in error handling are visible.
 
+Codegen output itself is pinned by **golden snapshots** (`tests/golden.test.ts`): the full generated module for one representative case per curated category, so every change to the emitted code is a reviewable diff.
+
 ---
 
 ## Test Levels

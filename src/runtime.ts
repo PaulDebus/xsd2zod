@@ -2,6 +2,7 @@ import XMLParser from '@nodable/flexible-xml-parser';
 import { CompactBuilderFactory } from '@nodable/compact-builder';
 import { BaseOutputBuilderFactory, type BaseOutputBuilder } from '@nodable/base-output-builder';
 import type { z } from 'zod';
+import { splitClark, splitQName } from './qname.js';
 import { xmlRegistry, type XmlFieldMeta, type XmlMeta } from './xmlMeta.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
@@ -18,8 +19,8 @@ type RegisterArgs = Parameters<BaseOutputBuilderFactory['registerValueParser']>;
 // upstream ships fixed declarations.
 class EntityCompactBuilderFactory extends BaseOutputBuilderFactory {
   // Entity decoding is left to the parser; number/boolean coercion is disabled
-  // so that readValue sees the raw lexicals and schema-driven coercion stays
-  // the single coercion point for elements and attributes (#65).
+  // so that every value arrives as a raw lexical and coerceLexical stays the
+  // single coercion point for elements and attributes (#65).
   private readonly inner = new CompactBuilderFactory({
     tags: { valueParsers: ['entity'] },
     attributes: { valueParsers: ['entity'] },
@@ -58,22 +59,6 @@ const textOf = (node: Record<string, unknown>): unknown => {
   }
   const cdataText = Array.isArray(cdata) ? cdata.join('') : String(cdata);
   return `${text === undefined ? '' : String(text)}${cdataText}`;
-};
-
-const splitClark = (qname: string): { namespace: string; local: string } => {
-  if (!qname.startsWith('{')) {
-    return { namespace: '', local: qname };
-  }
-  const boundary = qname.indexOf('}');
-  if (boundary === -1) {
-    return { namespace: '', local: qname };
-  }
-  return { namespace: qname.slice(1, boundary), local: qname.slice(boundary + 1) };
-};
-
-const splitXmlName = (name: string): { prefix: string; local: string } => {
-  const idx = name.indexOf(':');
-  return idx === -1 ? { prefix: '', local: name } : { prefix: name.slice(0, idx), local: name.slice(idx + 1) };
 };
 
 const collectNamespaceDeclarations = (node: Record<string, unknown>): Record<string, string> => {
@@ -204,21 +189,6 @@ const findRootMeta = (schema: AnySchema): XmlMeta | undefined => {
 // Walk the wrapper chain until a schema carries registry meta with a `fields`
 // map — type schemas register it on the lazy wrapper, which may sit below a
 // root export wrapper or array/optional cardinality wrappers.
-const findTypeMeta = (schema: AnySchema): XmlMeta | undefined => {
-  let current = schema;
-  for (;;) {
-    const meta = xmlRegistry.get(current);
-    if (meta?.fields) {
-      return meta;
-    }
-    const next = peelOnce(current);
-    if (next === current) {
-      return undefined;
-    }
-    current = next;
-  }
-};
-
 const findFieldsMeta = (schema: AnySchema): Record<string, XmlFieldMeta> | undefined => {
   let current = schema;
   for (;;) {
@@ -410,7 +380,7 @@ const findAttributeValue = (
     if (!key.startsWith('@_')) {
       continue;
     }
-    const { prefix, local } = splitXmlName(key.slice(2));
+    const { prefix, local } = splitQName(key.slice(2));
     const namespace = prefix ? (namespaceContext[prefix] ?? '') : '';
     if (local === expected.local && namespace === expected.namespace) {
       return value;
@@ -430,7 +400,7 @@ const findElementValues = (
     if (key.startsWith('@_') || key === '#text' || key === '#cdata') {
       continue;
     }
-    const { prefix, local } = splitXmlName(key);
+    const { prefix, local } = splitQName(key);
     if (local !== expected.local) {
       continue;
     }
@@ -465,7 +435,7 @@ const extractRoot = (
   const entry = Object.entries(parsed).find(([key, value]) => {
     const node = value && typeof value === 'object' ? (Array.isArray(value) ? value[0] : value) as Record<string, unknown> : {};
     const namespaceContext = withNamespaceContext({}, node);
-    const { prefix, local } = splitXmlName(key);
+    const { prefix, local } = splitQName(key);
     const namespace = prefix ? (namespaceContext[prefix] ?? '') : (namespaceContext[''] ?? '');
     return local === expected.local && namespace === expected.namespace;
   });
@@ -495,38 +465,6 @@ const readObject = (
 ): Record<string, unknown> => {
   const fields = findFieldsMeta(schema) ?? {};
   const shape = objectDefOf(schema)?.shape ?? {};
-  // --- Element order validation (#10) ---
-  // Scan node keys in document order and validate that known elements appear
-  // as a subsequence of the IR field order (which follows xs:sequence).
-  // Types with ≤1 element field or with xs:choice are skipped: the compact
-  // parser groups same-tag children, so choice fields' IR position doesn't
-  // reflect their actual position in the XSD sequence.
-  const elementFieldKeys = Object.keys(fields).filter((k) => fields[k].kind === 'element');
-  const typeMeta = findTypeMeta(schema);
-  if (elementFieldKeys.length > 1 && !typeMeta?.hasChoice) {
-    const elementQNames = elementFieldKeys.map((k) => splitClark(fields[k].qname));
-    let fieldIdx = 0;
-    for (const nodeKey of Object.keys(node)) {
-      if (nodeKey.startsWith('@_') || nodeKey === '#text' || nodeKey === '#cdata') continue;
-      const { prefix, local } = splitXmlName(nodeKey);
-      const namespace = prefix ? (namespaceContext[prefix] ?? '') : (namespaceContext[''] ?? '');
-
-      let matched = -1;
-      for (let i = 0; i < elementFieldKeys.length; i++) {
-        if (local === elementQNames[i].local && namespace === elementQNames[i].namespace) {
-          matched = i;
-          break;
-        }
-      }
-      if (matched === -1) continue; // unknown element (xs:any) — skip
-
-      if (matched < fieldIdx) {
-        throw new Error(`Element '${local}' out of order`);
-      }
-      fieldIdx = matched + 1;
-    }
-  }
-
   // Null prototype: an XSD element named __proto__ must become an own property,
   // not a silent prototype mutation (#84).
   const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
@@ -541,6 +479,16 @@ const readObject = (
     }
   }
   return result;
+};
+
+// Present-but-empty element: XSD applies default/fixed here (#66).
+const substituteEmpty = (
+  field: FieldAnalysis,
+  fieldMeta: XmlFieldMeta
+): { substituted: boolean; value?: unknown } => {
+  if (field.hasFixed) return { substituted: true, value: field.fixedValue };
+  if (fieldMeta.defaultValue !== undefined) return { substituted: true, value: fieldMeta.defaultValue };
+  return { substituted: false };
 };
 
 const readOccurrence = (
@@ -561,17 +509,16 @@ const readOccurrence = (
     }
     const text = textOf(childNode);
     if (text === undefined || text === '') {
-      // Present-but-empty element: XSD applies default/fixed here (#66).
-      if (field.hasFixed) return field.fixedValue;
-      if (fieldMeta.defaultValue !== undefined) return fieldMeta.defaultValue;
+      const empty = substituteEmpty(field, fieldMeta);
+      if (empty.substituted) return empty.value;
     }
     return coerceLexical(text, field.itemSchema);
   }
 
   // Scalar entry: the parser yields text-only elements as bare strings.
   if (entry === '') {
-    if (field.hasFixed) return field.fixedValue;
-    if (fieldMeta.defaultValue !== undefined) return fieldMeta.defaultValue;
+    const empty = substituteEmpty(field, fieldMeta);
+    if (empty.substituted) return empty.value;
   }
   if (hasObjectShape(field.itemSchema)) {
     return readObject(field.itemSchema, { '#text': entry }, namespaceContext);
