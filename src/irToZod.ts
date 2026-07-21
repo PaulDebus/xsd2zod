@@ -1,4 +1,5 @@
-import { clarkToLocal } from './parseXsd.js';
+import { Xsd2ZodError } from './errors.js';
+import { clarkToLocal, trySplitClark } from './qname.js';
 import { XSD_INTEGER_TYPE_NAMES } from './xsdBuiltins.js';
 import type {
   ComplexTypeDef,
@@ -13,15 +14,10 @@ const XSD_NS = 'http://www.w3.org/2001/XMLSchema';
 
 const NUMBER_PRIMITIVES = new Set([...XSD_INTEGER_TYPE_NAMES, 'decimal', 'float', 'double']);
 
-const splitClarkLocal = (typeName: QName): { ns: string; local: string } | undefined => {
-  const match = typeName.match(/^\{(.*)}(.*)$/);
-  return match ? { ns: match[1], local: match[2] } : undefined;
-};
-
 // Resolve a (possibly user-defined) simple type to its builtin base kind, so
 // fixed/default values are coerced to the JS type the runtime produces (#87).
 const resolvePrimitiveKind = (typeName: QName, ir: XsdIr, seen?: Set<string>): 'number' | 'boolean' | 'string' => {
-  const parts = splitClarkLocal(typeName);
+  const parts = trySplitClark(typeName);
   if (!parts) {
     return 'string';
   }
@@ -37,11 +33,18 @@ const resolvePrimitiveKind = (typeName: QName, ir: XsdIr, seen?: Set<string>): '
   }
   seenNames.add(typeName);
   const simple = ir.simpleTypes[typeName];
-  return simple ? resolvePrimitiveKind(simple.baseType, ir, seenNames) : 'string';
+  if (!simple) {
+    return 'string';
+  }
+  const base =
+    simple.kind === 'restriction' ? simple.baseType
+    : simple.kind === 'list' ? simple.itemType
+    : simple.memberTypes[0];
+  return base ? resolvePrimitiveKind(base, ir, seenNames) : 'string';
 };
 
 const primitiveToZod = (typeName: QName, definedTypes: Set<string>): string => {
-  const parts = splitClarkLocal(typeName);
+  const parts = trySplitClark(typeName);
   if (!parts) {
     return 'z.unknown()';
   }
@@ -102,20 +105,26 @@ const withDescription = (expr: string, description: string | undefined): string 
 
 type FacetUsage = { totalDigits: boolean; fractionDigits: boolean };
 
-const withFacets = (base: string, facets: Facet[], usage: FacetUsage): string => {
+// Enum facet values arrive as XSD lexicals; emit them coerced to the JS type
+// the runtime produces for the resolved primitive kind — same rule as
+// fixed/default values (#68, #84).
+const withFacets = (base: string, facets: Facet[], usage: FacetUsage, kind: 'number' | 'boolean' | 'string'): string => {
   if (!facets.length) return base;
 
   const enumFacets = facets.filter(f => f.kind === 'enumeration');
   const whiteSpace = facets.find(f => f.kind === 'whiteSpace');
   const otherFacets = facets.filter(f => f.kind !== 'enumeration' && f.kind !== 'whiteSpace');
+  const enumLiterals = enumFacets.map(f => typedLiteral(kind, f.value));
 
   let result = base;
   if (enumFacets.length > 0 && otherFacets.length === 0) {
-    const values = enumFacets.map(f => f.value);
     if (isStringType(base)) {
-      result = `z.enum([${values.map(v => JSON.stringify(v)).join(', ')}])`;
-    } else if (isNumberType(base)) {
-      result = `z.union([${values.map(v => `z.literal(${v})`).join(', ')}])`;
+      result = `z.enum([${enumLiterals.join(', ')}])`;
+    } else if (isNumberType(base) || base === 'z.boolean()') {
+      result = `z.union([${enumLiterals.map(lit => `z.literal(${lit})`).join(', ')}])`;
+    } else {
+      // Base is a reference to another type's schema — keep it and constrain.
+      result += `.refine((val) => [${enumLiterals.join(', ')}].includes(val), { message: 'value is not one of the allowed values' })`;
     }
   } else {
     for (const facet of otherFacets) {
@@ -156,8 +165,7 @@ const withFacets = (base: string, facets: Facet[], usage: FacetUsage): string =>
     }
 
     if (enumFacets.length > 0) {
-      const values = enumFacets.map(f => JSON.stringify(f.value));
-      result += `.refine((val) => [${values.join(', ')}].includes(val), { message: 'value is not one of the allowed values' })`;
+      result += `.refine((val) => [${enumLiterals.join(', ')}].includes(val), { message: 'value is not one of the allowed values' })`;
     }
   }
 
@@ -178,10 +186,12 @@ const withFacets = (base: string, facets: Facet[], usage: FacetUsage): string =>
 const sortSimpleTypes = (ir: XsdIr): SimpleTypeDef[] => {
   const types = Object.values(ir.simpleTypes);
   const byName = new Map(types.map((t) => [t.name, t]));
-  const dependencies = (t: SimpleTypeDef): SimpleTypeDef[] =>
-    [t.baseType, t.itemType, ...(t.memberTypes ?? [])]
-      .map((dep) => (dep === undefined ? undefined : byName.get(dep)))
+  const dependencies = (t: SimpleTypeDef): SimpleTypeDef[] => {
+    const deps = t.kind === 'restriction' ? [t.baseType] : t.kind === 'list' ? [t.itemType] : t.memberTypes;
+    return deps
+      .map((dep) => byName.get(dep))
       .filter((dep): dep is SimpleTypeDef => dep !== undefined);
+  };
 
   const sorted: SimpleTypeDef[] = [];
   const visited = new Set<string>();
@@ -306,9 +316,6 @@ const choiceRefines = (type: ComplexTypeDef): string[] => {
 const fieldsMetaFor = (type: ComplexTypeDef, ir: XsdIr): string => {
   const entries = type.fields.map((field) => {
     const parts = [`kind: ${JSON.stringify(field.kind)}`, `qname: ${JSON.stringify(field.qname)}`];
-    if (field.choiceGroup) {
-      parts.push(`choiceGroup: ${JSON.stringify(field.choiceGroup)}`);
-    }
     if (field.kind === 'element' && field.defaultValue !== undefined && field.fixedValue === undefined) {
       parts.push(`defaultValue: ${typedLiteral(resolvePrimitiveKind(field.typeName, ir), field.defaultValue)}`);
     }
@@ -333,22 +340,36 @@ export const irToZod = (ir: XsdIr, opts?: IrToZodOptions): { schemas: string } =
   schemaLines.push(''); // import line, filled in at the end once facet usage is known
   schemaLines.push(opts?.js ? 'const schemas = {};' : 'const schemas: Record<string, z.ZodTypeAny> = {};');
 
+  // Simple and complex types share the `schemas[...]` namespace in the
+  // generated module — a qname collision would silently overwrite. Fail loud.
+  const claimedTypeNames = new Set<string>();
+  const claimTypeName = (qname: string): void => {
+    if (claimedTypeNames.has(qname)) {
+      throw new Xsd2ZodError('type-name-collision', `type name collision: ${qname} is declared as both a simpleType and a complexType`);
+    }
+    claimedTypeNames.add(qname);
+  };
+
   for (const simpleType of sortSimpleTypes(ir)) {
+    claimTypeName(simpleType.name);
     let expr: string;
-    if (simpleType.itemType) {
+    if (simpleType.kind === 'list') {
       const itemExpr = primitiveToZod(simpleType.itemType, definedTypes);
       expr = `z.preprocess((v) => typeof v === "string" ? v.trim().split(/\\s+/) : v, z.array(${itemExpr}))`;
-    } else if (simpleType.memberTypes) {
+    } else if (simpleType.kind === 'union') {
       const memberExprs = simpleType.memberTypes.map(mt => primitiveToZod(mt, definedTypes));
       expr = `z.union([${memberExprs.join(', ')}])`;
     } else {
       const baseExpr = primitiveToZod(simpleType.baseType, definedTypes);
-      expr = simpleType.facets ? withFacets(baseExpr, simpleType.facets, usage) : baseExpr;
+      expr = simpleType.facets
+        ? withFacets(baseExpr, simpleType.facets, usage, resolvePrimitiveKind(simpleType.name, ir))
+        : baseExpr;
     }
     schemaLines.push(`schemas[${JSON.stringify(simpleType.name)}] = ${withDescription(expr, simpleType.description)}.register(xmlRegistry, { qname: ${JSON.stringify(simpleType.name)} });`);
   }
 
   for (const complexType of Object.values(ir.complexTypes)) {
+    claimTypeName(complexType.name);
     const multiBranch = multiBranchGroups(complexType);
     const props = complexType.fields
       .map((field) => `${JSON.stringify(toFieldKey(field))}: ${withDescription(withCardinality(
