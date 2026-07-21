@@ -219,6 +219,14 @@ const withCardinality = (schema: string, field: IrField, ir: XsdIr, forceOptiona
   }
   if (field.maxOccurs === 'unbounded' || field.maxOccurs > 1) {
     result = `z.array(${result})`;
+    // Skip .min() for choice fields (forceOptional): absent choice branches
+    // materialise as [] and must not fail cardinality validation (#73).
+    if (field.minOccurs > 0 && !forceOptional) {
+      result += `.min(${field.minOccurs})`;
+    }
+    if (field.maxOccurs !== 'unbounded') {
+      result += `.max(${field.maxOccurs})`;
+    }
   }
   if (field.minOccurs === 0 || forceOptional) {
     result += '.optional()';

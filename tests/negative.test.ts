@@ -23,11 +23,10 @@ interface NegativeCase {
 }
 
 const EXPECTED: Record<string, NegativeExpectation> = {
-  // Cardinality bounds are not expressible as zod checks on the array: extra
-  // items are kept (the libxml2 tier is the strict one).
-  'invalid-max-occurs': { data: { required: 'req', repeated: [1, 2, 3, 4, 5], '@must': 'abc' } },
-  // Fewer items than minOccurs: kept as-is.
-  'invalid-min-occurs': { data: { required: 'req', repeated: [1], '@must': 'abc' } },
+  // Bounded cardinality: maxOccurs=4 but XML has 5 items.
+  'invalid-max-occurs': { error: '<=4 items', zod: true },
+  // Bounded cardinality: minOccurs=2 but XML has 1 item.
+  'invalid-min-occurs': { error: '>=2 items', zod: true },
   // A missing required element now fails the final schema validation.
   'invalid-missing-required-element': { error: 'Invalid input: expected string', zod: true },
   // Root in a foreign namespace is rejected structurally.
